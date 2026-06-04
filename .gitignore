@@ -1,0 +1,14 @@
+plonkish/target/
+plonkish/benchmark/bench_data/
+
+target/
+benchmark/bench_data/
+
+*.log
+*.out
+*.prof
+*.trace
+*.proof
+*.bin
+*.dat
+.DS_Store
