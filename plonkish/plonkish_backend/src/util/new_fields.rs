@@ -14,6 +14,7 @@ use crate::util::{BigUint, {arithmetic::{modulus,Field}}};
 #[PrimeFieldModulus = "170141183460469231731687303715884105727"]
 #[PrimeFieldGenerator = "7"]
 #[PrimeFieldReprEndianness = "little"]
+#[repr(transparent)]
 pub struct Mersenne127([u64;2]);
 
 

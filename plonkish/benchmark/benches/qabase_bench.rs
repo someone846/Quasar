@@ -1,8 +1,6 @@
 use plonkish_backend::{
     pcs::multilinear::qabase::{
-        commit_and_write, prove_qabase_open_full_global_batch_batched_wht,
-        prove_qabase_open_scaffold_global_batch_batched_wht, setup, trim,
-        verify_qabase_open_full_global_batch_batched_wht,
+        commit_and_write, prove_qabase_open_scaffold_global_batch_batched_wht, setup, trim,
         verify_qabase_open_scaffold_global_batch_batched_wht,
     },
     util::{
@@ -30,55 +28,17 @@ type BenchField = Mersenne127;
 
 const OUTPUT_DIR: &str = "./bench_data/qabase";
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum OpenMode {
-    /// Current benchmark path: run only the existing proximity scaffold.
-    /// This is used as the DP24-style merged timing path.
-    Merge,
-
-    /// Complete protocol path: run proximity branch plus evaluation branch.
-    Full,
-}
-
-impl OpenMode {
-    fn as_str(self) -> &'static str {
-        match self {
-            OpenMode::Merge => "merge",
-            OpenMode::Full => "full",
-        }
-    }
-
-    fn parse(value: &str) -> Self {
-        match value {
-            "merge" | "Merge" | "MERGE" => OpenMode::Merge,
-            "full" | "Full" | "FULL" => OpenMode::Full,
-            other => panic!("invalid --open-mode: {other}; expected merge or full"),
-        }
-    }
-}
-
 #[derive(Clone, Debug)]
 struct BenchConfig {
     /// Total input-size exponents. The range is inclusive.
     total_k_values: Vec<usize>,
 
-    /// Which opening path to benchmark.
+    /// Row exponents to benchmark.
     ///
-    /// Merge keeps the old timing path and runs only the proximity scaffold.
-    /// Full runs proximity plus the evaluation branch q = QAEnc(eq(z_L, .)^T M).
-    open_mode: OpenMode,
-
-    /// Default row exponent used outside the special small-size schedule.
-    /// The committed matrix has 2^log_rows rows.
-    log_rows: usize,
-
-    /// If true, use the small-size schedule:
-    ///   total_k = 20,21 -> 16 rows  (log_rows = 4)
-    ///   total_k = 22,23 -> 32 rows  (log_rows = 5)
-    ///   otherwise       -> 2^log_rows rows.
-    ///
-    /// Default is false, so every total_k uses 2^log_rows rows.
-    small_row_schedule: bool,
+    /// The committed matrix has 2^log_rows rows.  By default, this benchmark
+    /// scans log_rows = 5,6,7,8,9 for every total_k, i.e. rows =
+    /// 32,64,128,256,512.
+    log_rows_values: Vec<usize>,
 
     /// QA inverse rate c. The code rate is 1/c.
     inverse_rate: usize,
@@ -98,7 +58,7 @@ struct BenchConfig {
     /// Target failure probability for the random QA-code distance bound.
     distance_failure_bits: usize,
 
-    /// Number of benchmark samples per total_k.
+    /// Number of benchmark samples per (total_k, log_rows) pair.
     samples: usize,
 
     /// Number of Rayon worker threads.
@@ -109,9 +69,7 @@ impl Default for BenchConfig {
     fn default() -> Self {
         Self {
             total_k_values: (20..=30).collect(),
-            open_mode: OpenMode::Merge,
-            log_rows: 6,
-            small_row_schedule: false,
+            log_rows_values: (5..=9).collect(),
             inverse_rate: 2,
             auto_queries: true,
             queries: 0,
@@ -120,20 +78,6 @@ impl Default for BenchConfig {
             distance_failure_bits: 100,
             samples: 5,
             threads: 32,
-        }
-    }
-}
-
-impl BenchConfig {
-    fn log_rows_for_total_k(&self, total_k: usize) -> usize {
-        if !self.small_row_schedule {
-            return self.log_rows;
-        }
-
-        match total_k {
-            20 | 21 => 4, // 16 rows
-            22 | 23 => 5, // 32 rows
-            _ => self.log_rows,
         }
     }
 }
@@ -153,9 +97,7 @@ struct SecurityChoice {
 }
 
 impl SecurityChoice {
-    fn new(total_k: usize, cfg: &BenchConfig) -> Self {
-        let log_rows = cfg.log_rows_for_total_k(total_k);
-
+    fn new(total_k: usize, log_rows: usize, cfg: &BenchConfig) -> Self {
         assert!(
             total_k >= log_rows,
             "total_k must be at least log_rows"
@@ -200,7 +142,6 @@ impl SecurityChoice {
 #[derive(Clone, Debug)]
 struct BenchResult {
     field: &'static str,
-    open_mode: OpenMode,
     total_k: usize,
     row_k: usize,
     log_rows: usize,
@@ -238,26 +179,35 @@ fn main() {
         println!("rayon current_num_threads = {}", current_num_threads());
 
         for total_k in cfg.total_k_values.clone() {
-            let result = bench_one_total_k(total_k, &cfg);
+            for log_rows in cfg.log_rows_values.clone() {
+                if total_k < log_rows {
+                    println!(
+                        "skip total_k={} with log_rows={} because total_k < log_rows",
+                        total_k, log_rows
+                    );
+                    continue;
+                }
 
-            println!(
-                "mode={}, total_k={}, row_k={}, log_rows={}, rows={}, c={}, delta={:.8}, queries={}, proof={} bytes, threads={}, commit={} ms, prove={} ms, verify={} ms",
-                result.open_mode.as_str(),
-                result.total_k,
-                result.row_k,
-                result.log_rows,
-                result.num_rows,
-                result.inverse_rate,
-                result.delta,
-                result.queries,
-                result.proof_bytes,
-                result.threads,
-                result.commit_avg.as_millis(),
-                result.prove_avg.as_millis(),
-                result.verify_avg.as_millis(),
-            );
+                let result = bench_one_total_k(total_k, log_rows, &cfg);
 
-            append_result(&path, &result);
+                println!(
+                    "total_k={}, row_k={}, log_rows={}, rows={}, c={}, delta={:.8}, queries={}, proof={} bytes, threads={}, commit={} ms, prove={} ms, verify={} ms",
+                    result.total_k,
+                    result.row_k,
+                    result.log_rows,
+                    result.num_rows,
+                    result.inverse_rate,
+                    result.delta,
+                    result.queries,
+                    result.proof_bytes,
+                    result.threads,
+                    result.commit_avg.as_millis(),
+                    result.prove_avg.as_millis(),
+                    result.verify_avg.as_millis(),
+                );
+
+                append_result(&path, &result);
+            }
         }
     });
 }
@@ -267,19 +217,36 @@ fn main() {
 // -----------------------------------------------------------------------------
 
 fn parse_exp_list(value: &str) -> Vec<usize> {
-    if let Some((start, end)) = value.split_once("..=") {
-        let start = start.parse::<usize>().expect("invalid range start");
-        let end = end.parse::<usize>().expect("invalid range end");
-        assert!(start <= end, "range start must be <= end");
-        (start..=end).collect()
-    } else if let Some((start, end)) = value.split_once("..") {
-        let start = start.parse::<usize>().expect("invalid range start");
-        let end = end.parse::<usize>().expect("invalid range end");
-        assert!(start <= end, "range start must be <= end");
-        (start..=end).collect()
-    } else {
-        vec![value.parse::<usize>().expect("invalid exponent")]
+    let mut values = Vec::new();
+
+    for part in value.split(',') {
+        let part = part.trim();
+
+        if part.is_empty() {
+            continue;
+        }
+
+        if let Some((start, end)) = part.split_once("..=") {
+            let start = start.parse::<usize>().expect("invalid range start");
+            let end = end.parse::<usize>().expect("invalid range end");
+            assert!(start <= end, "range start must be <= end");
+            values.extend(start..=end);
+        } else if let Some((start, end)) = part.split_once("..") {
+            let start = start.parse::<usize>().expect("invalid range start");
+            let end = end.parse::<usize>().expect("invalid range end");
+            assert!(start <= end, "range start must be <= end");
+            values.extend(start..=end);
+        } else {
+            values.push(part.parse::<usize>().expect("invalid exponent"));
+        }
     }
+
+    assert!(!values.is_empty(), "empty exponent list");
+
+    values.sort_unstable();
+    values.dedup();
+
+    values
 }
 
 fn parse_args() -> BenchConfig {
@@ -307,22 +274,24 @@ fn parse_args() -> BenchConfig {
                 cfg.total_k_values = parse_exp_list(&argv[i]);
             }
 
-            "--open-mode" => {
-                i += 1;
-                cfg.open_mode = OpenMode::parse(&argv[i]);
-            }
-
             "--log-rows" => {
                 i += 1;
-                cfg.log_rows = argv[i].parse().expect("invalid --log-rows");
+                cfg.log_rows_values = parse_exp_list(&argv[i]);
+            }
+
+            "--row-logs" => {
+                i += 1;
+                cfg.log_rows_values = parse_exp_list(&argv[i]);
             }
 
             "--small-row-schedule" => {
-                cfg.small_row_schedule = true;
+                // Backward-compatible preset used by earlier small-size tests.
+                cfg.log_rows_values = vec![4, 5, 6];
             }
 
             "--fixed-log-rows" => {
-                cfg.small_row_schedule = false;
+                // Backward-compatible no-op. Use --log-rows <r> for a single
+                // fixed decomposition.
             }
 
             "--inverse-rate" => {
@@ -378,6 +347,13 @@ fn parse_args() -> BenchConfig {
     }
 
     assert!(cfg.samples >= 1, "samples must be positive");
+    assert!(
+        !cfg.log_rows_values.is_empty(),
+        "at least one --log-rows value is required"
+    );
+    for &log_rows in &cfg.log_rows_values {
+        assert!(log_rows >= 1, "log_rows must be positive");
+    }
     assert!(cfg.inverse_rate >= 2, "inverse_rate must be at least 2");
     assert!(
         cfg.inverse_rate.is_power_of_two(),
@@ -393,11 +369,11 @@ fn parse_args() -> BenchConfig {
 
 fn print_help_and_exit() -> ! {
     eprintln!(
-        "QABase full PCS benchmark over F_{{2^127-1}} (Mersenne127)\n\n\
-         Recommended usage:\n\
+        "QABase PCS benchmark over F_{{2^127-1}} (Mersenne127)\n\n\
+         Recommended usage for row-decomposition scan:\n\
            cargo bench -p benchmark --bench qabase_bench -- \\\n\
              --total-k 20..30 \\\n\
-             --open-mode merge \\\n\
+             --log-rows 5..9 \\\n\
              --inverse-rate 2 \\\n\
              --field-bits 127 \\\n\
              --security 100 \\\n\
@@ -405,20 +381,18 @@ fn print_help_and_exit() -> ! {
              --auto-queries \\\n\
              --samples 5 \\\n\
              --threads 32\n\n\
-         Row schedule:\n\
-           default: always use 2^--log-rows rows; with --log-rows=6 this is 64 rows\n\
-           optional --small-row-schedule:\n\
-             total_k = 20,21 -> 16 rows  (log_rows=4)\n\
-             total_k = 22,23 -> 32 rows  (log_rows=5)\n\
-             otherwise       -> 2^--log-rows rows\n\n\
+         Row decomposition scan:\n\
+           default: test log_rows = 5,6,7,8,9 for every total_k\n\
+           equivalently, rows = 32,64,128,256,512\n\
+           use --log-rows <r | a..b | a,b,c> to override, e.g. --log-rows 6 or --log-rows 5..9\n\n\
          Options:\n\
            --total-k <k | a..b>       Total input-size exponent(s), inclusive\n\
            --k <k | a..b>             Alias for --total-k\n\
-           --open-mode <merge|full>   merge: old proximity-only timing; full: complete protocol\n\
            --inverse-rate <c>         QA inverse rate c. Default: 2\n\
-           --log-rows <r>             Default number of rows is 2^r. Default: 6\n\
-           --small-row-schedule       Enable 16/32-row schedule for small sizes\n\
-           --fixed-log-rows           Always use --log-rows. This is the default\n\
+           --log-rows <r|a..b|list>   Row exponents to test. Default: 5..9\n\
+           --row-logs <r|a..b|list>   Alias for --log-rows\n\
+           --small-row-schedule       Backward-compatible preset: log_rows=4,5,6\n\
+           --fixed-log-rows           Backward-compatible no-op; use --log-rows <r> instead\n\
            --auto-queries             Compute queries from QA distance bound\n\
            --queries <q>              Manual Merkle query count; disables auto-queries\n\
            --field-bits <b>           Field-size bits for parameter calculation\n\
@@ -563,115 +537,6 @@ fn make_random_matrix(
         .collect::<Vec<_>>()
 }
 
-fn make_random_point(num_vars: usize, rng: &mut ChaCha8Rng) -> Vec<BenchField> {
-    (0..num_vars)
-        .map(|_| BenchField::random(&mut *rng))
-        .collect::<Vec<_>>()
-}
-
-fn split_evaluation_point(
-    point: &[BenchField],
-    log_rows: usize,
-    row_k: usize,
-) -> (Vec<BenchField>, Vec<BenchField>) {
-    assert_eq!(
-        point.len(),
-        log_rows + row_k,
-        "full evaluation point length mismatch"
-    );
-
-    let z_left = point[..log_rows].to_vec();
-    let z_right = point[log_rows..].to_vec();
-
-    (z_left, z_right)
-}
-
-fn equality_eval_at_index(
-    index: usize,
-    num_vars: usize,
-    point: &[BenchField],
-) -> BenchField {
-    assert_eq!(point.len(), num_vars, "point length mismatch");
-    assert!(index < (1usize << num_vars), "index out of range");
-
-    let mut acc = BenchField::ONE;
-
-    for i in 0..num_vars {
-        acc *= if ((index >> i) & 1) == 1 {
-            point[i]
-        } else {
-            BenchField::ONE - point[i]
-        };
-    }
-
-    acc
-}
-
-fn eval_mle_from_evals_local(evals: &[BenchField], point: &[BenchField]) -> BenchField {
-    assert!(
-        evals.len().is_power_of_two(),
-        "MLE eval vector length must be a power of two"
-    );
-    assert_eq!(
-        evals.len(),
-        1usize << point.len(),
-        "point length does not match eval length"
-    );
-
-    let mut layer = evals.to_vec();
-    let mut size = layer.len();
-
-    for r in point {
-        let half = size >> 1;
-
-        for i in 0..half {
-            let left = layer[2 * i];
-            let right = layer[2 * i + 1];
-            layer[i] = left * (BenchField::ONE - *r) + right * (*r);
-        }
-
-        size = half;
-    }
-
-    layer[0]
-}
-
-fn evaluate_matrix_at_point(
-    matrix: &[Vec<BenchField>],
-    z_left: &[BenchField],
-    z_right: &[BenchField],
-) -> BenchField {
-    assert!(!matrix.is_empty(), "cannot evaluate an empty matrix");
-    assert_eq!(
-        matrix.len(),
-        1usize << z_left.len(),
-        "z_left length does not match matrix row count"
-    );
-
-    let row_len = matrix[0].len();
-    assert_eq!(
-        row_len,
-        1usize << z_right.len(),
-        "z_right length does not match matrix row length"
-    );
-
-    for row in matrix {
-        assert_eq!(row.len(), row_len, "all rows must have the same length");
-    }
-
-    let mut folded_row = vec![BenchField::ZERO; row_len];
-
-    for (row_index, row) in matrix.iter().enumerate() {
-        let weight = equality_eval_at_index(row_index, z_left.len(), z_left);
-
-        for j in 0..row_len {
-            folded_row[j] += weight * row[j];
-        }
-    }
-
-    eval_mle_from_evals_local(&folded_row, z_right)
-}
-
 fn avg_after_warmup(times: &[Duration]) -> Duration {
     assert!(!times.is_empty());
 
@@ -686,8 +551,8 @@ fn avg_after_warmup(times: &[Duration]) -> Duration {
     acc / ((times.len() - start) as u32)
 }
 
-fn bench_one_total_k(total_k: usize, cfg: &BenchConfig) -> BenchResult {
-    let choice = SecurityChoice::new(total_k, cfg);
+fn bench_one_total_k(total_k: usize, log_rows: usize, cfg: &BenchConfig) -> BenchResult {
+    let choice = SecurityChoice::new(total_k, log_rows, cfg);
     let row_size = choice.row_size();
 
     println!(
@@ -720,13 +585,6 @@ fn bench_one_total_k(total_k: usize, cfg: &BenchConfig) -> BenchResult {
 
     let matrix = make_random_matrix(choice.row_k, choice.num_rows, &mut rng);
 
-    // Public evaluation point and claimed value for Full mode.
-    // These are computed outside the timed prove/verify sections.
-    let full_point = make_random_point(choice.total_k, &mut rng);
-    let (z_left, z_right) =
-        split_evaluation_point(&full_point, choice.log_rows, choice.row_k);
-    let claimed_value = evaluate_matrix_at_point(&matrix, &z_left, &z_right);
-
     let mut commit_times = Vec::with_capacity(cfg.samples);
     let mut prove_times = Vec::with_capacity(cfg.samples);
     let mut verify_times = Vec::with_capacity(cfg.samples);
@@ -741,29 +599,14 @@ fn bench_one_total_k(total_k: usize, cfg: &BenchConfig) -> BenchResult {
         commit_times.push(start.elapsed());
 
         let start = Instant::now();
-        match cfg.open_mode {
-            OpenMode::Merge => {
-                prove_qabase_open_scaffold_global_batch_batched_wht::<BenchField, Blake2s>(
-                    &pp,
-                    &matrix,
-                    &comm,
-                    &mut prover_transcript,
-                )
-                .expect("QABase merge prover failed");
-            }
-            OpenMode::Full => {
-                prove_qabase_open_full_global_batch_batched_wht::<BenchField, Blake2s>(
-                    &pp,
-                    &matrix,
-                    &comm,
-                    z_left.clone(),
-                    z_right.clone(),
-                    claimed_value,
-                    &mut prover_transcript,
-                )
-                .expect("QABase full prover failed");
-            }
-        }
+        let _prover_output =
+            prove_qabase_open_scaffold_global_batch_batched_wht::<BenchField, Blake2s>(
+                &pp,
+                &matrix,
+                &comm,
+                &mut prover_transcript,
+            )
+            .expect("QABase prover failed");
         prove_times.push(start.elapsed());
 
         let proof = prover_transcript.into_proof();
@@ -772,42 +615,19 @@ fn bench_one_total_k(total_k: usize, cfg: &BenchConfig) -> BenchResult {
         let mut verifier_transcript = TestTranscript::from_proof((), proof.as_slice());
 
         let start = Instant::now();
-        let ok = match cfg.open_mode {
-            OpenMode::Merge => {
-                let (ok, _verifier_output) =
-                    verify_qabase_open_scaffold_global_batch_batched_wht::<BenchField, Blake2s>(
-                        &vp,
-                        &comm,
-                        &mut verifier_transcript,
-                    )
-                    .expect("QABase merge verifier errored");
-                ok
-            }
-            OpenMode::Full => {
-                let (ok, _verifier_output) =
-                    verify_qabase_open_full_global_batch_batched_wht::<BenchField, Blake2s>(
-                        &vp,
-                        &comm,
-                        z_left.clone(),
-                        z_right.clone(),
-                        claimed_value,
-                        &mut verifier_transcript,
-                    )
-                    .expect("QABase full verifier errored");
-                ok
-            }
-        };
+        let (ok, _verifier_output) =
+            verify_qabase_open_scaffold_global_batch_batched_wht::<BenchField, Blake2s>(
+                &vp,
+                &comm,
+                &mut verifier_transcript,
+            )
+            .expect("QABase verifier errored");
         verify_times.push(start.elapsed());
 
-        assert!(
-            ok,
-            "QABase verifier rejected in {} mode",
-            cfg.open_mode.as_str()
-        );
+        assert!(ok, "QABase verifier rejected");
 
         println!(
-            "sample {sample_idx}: mode={}, total_k={}, row_k={}, log_rows={}, rows={}, c={}, queries={}, proof={} bytes",
-            cfg.open_mode.as_str(),
+            "sample {sample_idx}: total_k={}, row_k={}, log_rows={}, rows={}, c={}, queries={}, proof={} bytes",
             choice.total_k,
             choice.row_k,
             choice.log_rows,
@@ -820,7 +640,6 @@ fn bench_one_total_k(total_k: usize, cfg: &BenchConfig) -> BenchResult {
 
     BenchResult {
         field: "mersenne127",
-        open_mode: cfg.open_mode,
         total_k: choice.total_k,
         row_k: choice.row_k,
         log_rows: choice.log_rows,
@@ -856,15 +675,20 @@ fn output_path(cfg: &BenchConfig) -> String {
         cfg.queries.to_string()
     };
 
-    let row_tag = if cfg.small_row_schedule {
-        format!("smallrows16_32_default{}", 1usize << cfg.log_rows)
+    let row_tag = if cfg.log_rows_values.len() == 1 {
+        format!("logrows{}", cfg.log_rows_values[0])
     } else {
-        format!("rows{}", 1usize << cfg.log_rows)
+        let list = cfg
+            .log_rows_values
+            .iter()
+            .map(|v| v.to_string())
+            .collect::<Vec<_>>()
+            .join("_");
+        format!("logrows{}", list)
     };
 
     format!(
-        "{OUTPUT_DIR}/qabase_mersenne127_{}_rho{}_{}_sec{}_df{}_queries{}_th{}.csv",
-        cfg.open_mode.as_str(),
+        "{OUTPUT_DIR}/qabase_mersenne127_full_rho{}_{}_sec{}_df{}_queries{}_th{}.csv",
         cfg.inverse_rate,
         row_tag,
         cfg.security_bits,
@@ -880,7 +704,7 @@ fn write_header_if_new(path: &str) {
 
         writeln!(
             &mut f,
-            "field,open_mode,total_k,row_k,log_rows,num_rows,inverse_rate,field_bits,security_bits,distance_failure_bits,delta,queries,proof_bytes,threads,commit_ms,prove_ms,verify_ms"
+            "field,total_k,row_k,log_rows,num_rows,inverse_rate,field_bits,security_bits,distance_failure_bits,delta,queries,proof_bytes,threads,commit_ms,prove_ms,verify_ms"
         )
         .unwrap();
     }
@@ -894,9 +718,8 @@ fn append_result(path: &str, result: &BenchResult) {
 
     writeln!(
         &mut f,
-        "{},{},{},{},{},{},{},{},{},{},{:.8},{},{},{},{},{},{}",
+        "{},{},{},{},{},{},{},{},{},{:.8},{},{},{},{},{},{}",
         result.field,
-        result.open_mode.as_str(),
         result.total_k,
         result.row_k,
         result.log_rows,

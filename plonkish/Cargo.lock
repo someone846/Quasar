@@ -1429,6 +1429,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "qa-gpu-overlay"
+version = "0.1.0"
+dependencies = [
+ "plonkish_backend",
+ "rand_chacha",
+ "rayon",
+]
+
+[[package]]
 name = "quick-xml"
 version = "0.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

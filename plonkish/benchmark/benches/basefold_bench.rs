@@ -45,8 +45,8 @@ const DEFAULT_K_END_EXCLUSIVE: usize = 31; // 20..31 means 2^20 through 2^30.
 const DEFAULT_THREADS: usize = 32;
 const DEFAULT_SAMPLES: usize = 5;
 
-const BASEFOLD_LOG_RATE: usize = 1; // inverse rate = 2^1 = 2, code rate = 1/2.
-const BASEFOLD_REPS: usize = 241; // 100-bit query soundness for rate 1/2.
+const BASEFOLD_LOG_RATE: usize = 2; // inverse rate = 2^1 = 2, code rate = 1/2.
+const BASEFOLD_REPS: usize = 148; // 100-bit query soundness for rate 1/2.
 const BASEFOLD_BASECODE_ROUNDS: usize = 2;
 const BASEFOLD_RS_BASECODE: bool = true;
 const BASEFOLD_CODE_TYPE: &str = "random";

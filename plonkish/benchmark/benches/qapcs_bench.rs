@@ -1,44 +1,47 @@
-//! Benchmark for `MultilinearQAPCS`.
+//! Full-opening benchmark for `MultilinearQAPCS`.
 //!
 //! Intended path:
 //!
 //!     benchmark/benches/qapcs_bench.rs
 //!
-//! This version matches the QABase benchmark output style:
+//! Assumptions:
 //!
-//! - writes CSV files under `./bench_data/qapcs`;
-//! - creates the output directory automatically;
-//! - appends one averaged row per `total_k`;
-//! - for `samples >= 5`, averages only samples 2..samples, i.e. discards the
-//!   first two warm-up samples, matching the QABase benchmark convention.
+//! - `qapcs.rs` and `quasar.rs` are both exported from
+//!   `plonkish_backend::pcs::multilinear`;
+//! - QAPCS exposes `qapcs_open_full` and `qapcs_verify_full`;
+//! - hash commitments are absorbed into the Fiat--Shamir transcript.
 //!
-//! Example:
+//! This benchmark:
 //!
-//!     RAYON_NUM_THREADS=32 cargo bench -p benchmark --bench qapcs_bench -- \
-//!       --total-k 20..30 --samples 5 --threads 32
-//!
-//! If the benchmark target is not already configured with `harness = false`, add
-//! the corresponding bench target to `benchmark/Cargo.toml`:
-//!
-//!     [[bench]]
-//!     name = "qapcs_bench"
-//!     harness = false
+//! 1. measures setup and trim separately;
+//! 2. prepares the claimed MLE evaluation in O(N) time using the same
+//!    row-major decomposition as QAPCS;
+//! 3. measures commitment samples before opening samples;
+//! 4. writes the QAPCS root into each proof transcript before sampling opening
+//!    challenges, and verifies that root before running the verifier;
+//! 5. uses the median commitment time and the post-warm-up mean for
+//!    open/verify.
 
 use plonkish_backend::{
     pcs::{
-        multilinear::qapcs::{MultilinearQAPCS, QAPCSSpec, QAPCSSpecRateHalf100},
+        multilinear::qapcs::{
+            qapcs_open_full, qapcs_verify_full, MultilinearQAPCS, QAPCSSpec,
+            QAPCSSpecRateHalf100,
+        },
         PolynomialCommitmentScheme,
     },
     poly::{multilinear::MultilinearPolynomial, Polynomial},
     util::{
-        arithmetic::{Field, PrimeField},
-        hash::Blake2s,
+        arithmetic::{inner_product, Field, PrimeField},
+        hash::{Blake2s, Output},
         new_fields::Mersenne127,
-        transcript::{Blake2sTranscript, InMemoryTranscript},
+        transcript::{
+            Blake2sTranscript, InMemoryTranscript, TranscriptRead, TranscriptWrite,
+        },
     },
 };
 use rand_chacha::{rand_core::SeedableRng, ChaCha8Rng};
-use rayon::{current_num_threads, ThreadPoolBuilder};
+use rayon::{current_num_threads, prelude::*, ThreadPoolBuilder};
 use std::{
     env,
     fs::{create_dir_all, File, OpenOptions},
@@ -52,9 +55,10 @@ type BenchHash = Blake2s;
 type BenchSpec = QAPCSSpecRateHalf100;
 type BenchPcs = MultilinearQAPCS<BenchField, BenchHash, BenchSpec>;
 type BenchTranscript = Blake2sTranscript<Cursor<Vec<u8>>>;
+type BenchCommitmentChunk = Output<BenchHash>;
 
 const DEFAULT_TOTAL_K_START: usize = 20;
-const DEFAULT_TOTAL_K_END: usize = 30;
+const DEFAULT_TOTAL_K_END: usize = 28;
 const DEFAULT_SAMPLES: usize = 5;
 const DEFAULT_THREADS: usize = 32;
 const OUTPUT_DIR: &str = "./bench_data/qapcs";
@@ -62,14 +66,16 @@ const OUTPUT_DIR: &str = "./bench_data/qapcs";
 fn main() {
     let args = Args::parse();
 
+    // Keep libraries that inspect this environment variable consistent with the
+    // dedicated pool used below.
     env::set_var("RAYON_NUM_THREADS", args.threads.to_string());
 
     ensure_output_dir();
     let path = output_path(&args);
     write_header_if_new(&path);
 
-    eprintln!("QAPCS benchmark config: {args:?}");
-    eprintln!("writing csv to {path}");
+    eprintln!("QAPCS full-opening benchmark config: {args:?}");
+    eprintln!("writing CSV to {path}");
 
     let pool = ThreadPoolBuilder::new()
         .num_threads(args.threads)
@@ -83,7 +89,12 @@ fn main() {
             let result = bench_one_total_k(total_k, &args);
 
             println!(
-                "total_k={}, row_log={}, log_rows={}, rows={}, row_len={}, codeword_len={}, c={}, delta={:.8}, queries={}, proximity_reps={}, proof={} bytes, threads={}, commit={} ms, open={} ms, verify={} ms",
+                concat!(
+                    "total_k={}, row_log={}, log_rows={}, rows={}, row_len={}, ",
+                    "codeword_len={}, c={}, delta={:.8}, queries={}, proximity_reps={}, ",
+                    "proof={} bytes, threads={}, setup={:.3} ms, trim={:.3} ms, ",
+                    "eval_prepare={:.3} ms, commit={:.3} ms, open={:.3} ms, verify={:.3} ms"
+                ),
                 result.total_k,
                 result.row_log,
                 result.log_rows,
@@ -96,9 +107,12 @@ fn main() {
                 result.proximity_reps,
                 result.proof_bytes,
                 result.threads,
-                result.commit_avg.as_millis(),
-                result.open_avg.as_millis(),
-                result.verify_avg.as_millis(),
+                duration_ms(result.setup_time),
+                duration_ms(result.trim_time),
+                duration_ms(result.eval_prepare_time),
+                duration_ms(result.commit_time),
+                duration_ms(result.open_time),
+                duration_ms(result.verify_time),
             );
 
             append_result(&path, &result);
@@ -111,6 +125,7 @@ fn main() {
 #[derive(Clone, Debug)]
 struct BenchResult {
     field: &'static str,
+    protocol: &'static str,
     total_k: usize,
     row_log: usize,
     log_rows: usize,
@@ -124,28 +139,44 @@ struct BenchResult {
     queries: usize,
     proximity_reps: usize,
     threads: usize,
-    commit_avg: Duration,
-    open_avg: Duration,
-    verify_avg: Duration,
+    setup_time: Duration,
+    trim_time: Duration,
+    eval_prepare_time: Duration,
+    commit_time: Duration,
+    open_time: Duration,
+    verify_time: Duration,
     proof_bytes: usize,
 }
 
 fn bench_one_total_k(total_k: usize, args: &Args) -> BenchResult {
-    assert!(total_k < usize::BITS as usize, "total_k too large for usize");
+    assert!(
+        total_k < usize::BITS as usize,
+        "total_k is too large for usize"
+    );
 
     let poly_size = 1usize << total_k;
 
-    // Use one setup/trim per total_k, then run several fresh samples under the
-    // same shape. This matches how the averaged QABase benchmark is organized.
     let mut setup_rng = ChaCha8Rng::from_seed(seed_from(total_k, usize::MAX));
-    let param = BenchPcs::setup(poly_size, 1, &mut setup_rng).expect("QAPCS setup failed");
-    let (pp, vp) = BenchPcs::trim(&param, poly_size, 1).expect("QAPCS trim failed");
+
+    let setup_start = Instant::now();
+    let param =
+        BenchPcs::setup(poly_size, 1, &mut setup_rng).expect("QAPCS setup failed");
+    let setup_time = setup_start.elapsed();
+
+    let trim_start = Instant::now();
+    let (pp, vp) =
+        BenchPcs::trim(&param, poly_size, 1).expect("QAPCS trim failed");
+    let trim_time = trim_start.elapsed();
 
     let shape = pp.shape().clone();
     let log_rows = shape.num_rows.trailing_zeros() as usize;
 
     eprintln!(
-        "QAPCS parameters: total=2^{}, row=2^{}, log_rows={}, rows={}, row_len={}, codeword_len={}, c={}, security={}, distance_failure={}, delta={:.8}, queries={}, proximity_reps={}, threads={}",
+        concat!(
+            "QAPCS parameters: total=2^{}, row=2^{}, log_rows={}, rows={}, ",
+            "row_len={}, codeword_len={}, c={}, security={}, distance_failure={}, ",
+            "delta={:.8}, queries={}, proximity_reps={}, threads={}"
+        ),
         total_k,
         shape.row_log_size,
         log_rows,
@@ -161,54 +192,131 @@ fn bench_one_total_k(total_k: usize, args: &Args) -> BenchResult {
         current_num_threads(),
     );
 
+    // Generate one fixed benchmark instance. Reusing it removes input-generation
+    // noise from protocol timings.
+    let mut rng = ChaCha8Rng::from_seed(seed_from(total_k, 0));
+    let evals = random_vec::<BenchField>(poly_size, &mut rng);
+    let poly = MultilinearPolynomial::new(evals);
+    let point = random_vec::<BenchField>(total_k, &mut rng);
+
+    let eval_prepare_start = Instant::now();
+    let eval = prepare_row_major_mle_evaluation::<BenchField>(
+        poly.evals(),
+        &point,
+        shape.num_rows,
+        shape.row_len,
+    );
+    let eval_prepare_time = eval_prepare_start.elapsed();
+
+    // Commitment-only measurements. No opening work is interleaved.
     let mut commit_times = Vec::with_capacity(args.samples);
+    for sample in 0..args.samples {
+        let start = Instant::now();
+        let comm =
+            BenchPcs::commit(&pp, &poly).expect("QAPCS commitment failed");
+        let elapsed = start.elapsed();
+        commit_times.push(elapsed);
+
+        eprintln!(
+            concat!(
+                "commit-only sample {}: total_k={}, row_log={}, rows={}, ",
+                "commit={:.3} ms"
+            ),
+            sample,
+            total_k,
+            shape.row_log_size,
+            shape.num_rows,
+            duration_ms(elapsed),
+        );
+
+        drop(comm);
+    }
+
+    // One reusable commitment for all opening/verification samples.
+    let comm =
+        BenchPcs::commit(&pp, &poly).expect("reusable QAPCS commitment failed");
+
     let mut open_times = Vec::with_capacity(args.samples);
     let mut verify_times = Vec::with_capacity(args.samples);
     let mut last_proof_bytes = 0usize;
 
     for sample in 0..args.samples {
-        let mut rng = ChaCha8Rng::from_seed(seed_from(total_k, sample));
-
-        let evals = random_vec::<BenchField>(poly_size, &mut rng);
-        let poly = MultilinearPolynomial::new(evals);
-
-        let point = random_vec::<BenchField>(total_k, &mut rng);
-        let eval = evaluate_mle_slow::<BenchField>(poly.evals(), &point);
-
-        let now = Instant::now();
-        let comm = BenchPcs::commit(&pp, &poly).expect("QAPCS commit failed");
-        commit_times.push(now.elapsed());
-
         let mut prover_transcript = BenchTranscript::new(());
-        let now = Instant::now();
-        BenchPcs::open(&pp, &poly, &comm, &point, &eval, &mut prover_transcript)
-            .expect("QAPCS open failed");
-        open_times.push(now.elapsed());
+
+        // Bind all subsequent Fiat--Shamir challenges to the main commitment.
+        <BenchTranscript as TranscriptWrite<
+            BenchCommitmentChunk,
+            BenchField,
+        >>::write_commitment(&mut prover_transcript, comm.root())
+        .expect("failed to write QAPCS commitment root");
+
+        let open_start = Instant::now();
+        qapcs_open_full::<BenchField, BenchHash>(
+            &pp,
+            &poly,
+            &comm,
+            &point,
+            &eval,
+            &mut prover_transcript,
+        )
+        .expect("QAPCS full opening failed");
+        let open_elapsed = open_start.elapsed();
+        open_times.push(open_elapsed);
 
         let proof = prover_transcript.into_proof();
         last_proof_bytes = proof.len();
 
-        let mut verifier_transcript = BenchTranscript::from_proof((), proof.as_slice());
-        let now = Instant::now();
-        BenchPcs::verify(&vp, &comm, &point, &eval, &mut verifier_transcript)
-            .expect("QAPCS verify failed");
-        verify_times.push(now.elapsed());
+        let mut verifier_transcript =
+            BenchTranscript::from_proof((), proof.as_slice());
+
+        // Match the Quasar benchmark: verifier time includes reading and
+        // checking the public commitment root.
+        let verify_start = Instant::now();
+
+        // Read and bind the same root before replaying verifier challenges.
+        let root_from_proof = <BenchTranscript as TranscriptRead<
+            BenchCommitmentChunk,
+            BenchField,
+        >>::read_commitment(&mut verifier_transcript)
+        .expect("failed to read QAPCS commitment root");
+
+        assert_eq!(
+            &root_from_proof,
+            comm.root(),
+            "QAPCS commitment root mismatch"
+        );
+
+        qapcs_verify_full::<BenchField, BenchHash>(
+            &vp,
+            &comm,
+            &point,
+            &eval,
+            &mut verifier_transcript,
+        )
+        .expect("QAPCS full verification failed");
+        let verify_elapsed = verify_start.elapsed();
+        verify_times.push(verify_elapsed);
 
         eprintln!(
-            "sample {sample}: total_k={}, row_log={}, rows={}, queries={}, proof={} bytes, commit={} ms, open={} ms, verify={} ms",
+            concat!(
+                "open/verify sample {}: total_k={}, row_log={}, rows={}, queries={}, ",
+                "proximity_reps={}, proof={} bytes, open={:.3} ms, verify={:.3} ms"
+            ),
+            sample,
             total_k,
             shape.row_log_size,
             shape.num_rows,
             shape.num_column_opening,
+            shape.num_proximity_testing,
             last_proof_bytes,
-            commit_times.last().unwrap().as_millis(),
-            open_times.last().unwrap().as_millis(),
-            verify_times.last().unwrap().as_millis(),
+            duration_ms(open_elapsed),
+            duration_ms(verify_elapsed),
         );
     }
 
     BenchResult {
         field: "mersenne127",
+        protocol: "qapcs_full_opening",
         total_k,
         row_log: shape.row_log_size,
         log_rows,
@@ -217,14 +325,18 @@ fn bench_one_total_k(total_k: usize, args: &Args) -> BenchResult {
         codeword_len: shape.codeword_len,
         inverse_rate: <BenchSpec as QAPCSSpec>::inverse_rate(),
         security_bits: <BenchSpec as QAPCSSpec>::security_bits(),
-        distance_failure_bits: <BenchSpec as QAPCSSpec>::distance_failure_bits(),
+        distance_failure_bits:
+            <BenchSpec as QAPCSSpec>::distance_failure_bits(),
         delta: shape.delta,
         queries: shape.num_column_opening,
         proximity_reps: shape.num_proximity_testing,
         threads: current_num_threads(),
-        commit_avg: avg_after_warmup(&commit_times),
-        open_avg: avg_after_warmup(&open_times),
-        verify_avg: avg_after_warmup(&verify_times),
+        setup_time,
+        trim_time,
+        eval_prepare_time,
+        commit_time: median_duration(&commit_times),
+        open_time: avg_after_warmup(&open_times),
+        verify_time: avg_after_warmup(&verify_times),
         proof_bytes: last_proof_bytes,
     }
 }
@@ -233,53 +345,86 @@ fn random_vec<F>(len: usize, rng: &mut ChaCha8Rng) -> Vec<F>
 where
     F: Field,
 {
-    (0..len).map(|_| F::random(&mut *rng)).collect()
+    (0..len)
+        .map(|_| F::random(&mut *rng))
+        .collect()
 }
 
-/// Memory-light multilinear evaluation.
+/// Evaluate a row-major MLE in O(N) field operations.
 ///
-/// This avoids cloning the full evaluation vector, which matters for 2^30-scale
-/// benchmarks. It uses the same little-endian Boolean-index convention as the
-/// standard in-place folding algorithm:
+/// For:
 ///
-///     eval(point) = sum_b evals[b] * prod_i eq(b_i, point_i).
+///     flat[row * row_len + column],
 ///
-/// It costs O(N log N) field operations and O(1) extra memory.
-fn evaluate_mle_slow<F>(evals: &[F], point: &[F]) -> F
+/// the first MLE coordinates index columns and the final log2(num_rows)
+/// coordinates index rows.
+fn prepare_row_major_mle_evaluation<F>(
+    evals: &[F],
+    point: &[F],
+    num_rows: usize,
+    row_len: usize,
+) -> F
 where
-    F: PrimeField,
+    F: PrimeField + Send + Sync,
 {
-    assert!(evals.len().is_power_of_two(), "MLE eval length must be a power of two");
-    assert_eq!(evals.len(), 1usize << point.len(), "point length mismatch");
+    assert!(num_rows.is_power_of_two());
+    assert!(row_len.is_power_of_two());
+    assert_eq!(evals.len(), num_rows * row_len);
 
-    let mut acc = F::ZERO;
-    for (idx, value) in evals.iter().enumerate() {
-        let mut weight = F::ONE;
-        for (bit, r) in point.iter().enumerate() {
-            weight *= if ((idx >> bit) & 1) == 1 {
-                *r
-            } else {
-                F::ONE - *r
-            };
-        }
-        acc += *value * weight;
-    }
-    acc
+    let log_rows = num_rows.trailing_zeros() as usize;
+    let log_columns = row_len.trailing_zeros() as usize;
+    assert_eq!(point.len(), log_columns + log_rows);
+
+    let (column_point, row_point) = point.split_at(log_columns);
+    let row_weights =
+        MultilinearPolynomial::<F>::eq_xy(row_point).into_evals();
+    let column_weights =
+        MultilinearPolynomial::<F>::eq_xy(column_point).into_evals();
+
+    assert_eq!(row_weights.len(), num_rows);
+    assert_eq!(column_weights.len(), row_len);
+
+    let folded_row = (0..row_len)
+        .into_par_iter()
+        .map(|column| {
+            let mut acc = F::ZERO;
+            for row in 0..num_rows {
+                acc += row_weights[row] * evals[row * row_len + column];
+            }
+            acc
+        })
+        .collect::<Vec<_>>();
+
+    inner_product(&folded_row, &column_weights)
 }
 
 fn avg_after_warmup(times: &[Duration]) -> Duration {
     assert!(!times.is_empty());
 
-    // Same convention as qabase_bench: for 5 samples, report the average of the
-    // last 3 samples; for fewer samples, average all available samples.
     let start = if times.len() >= 5 { 2 } else { 0 };
-
-    let mut acc = Duration::new(0, 0);
-    for t in &times[start..] {
-        acc += *t;
+    let mut acc = Duration::ZERO;
+    for time in &times[start..] {
+        acc += *time;
     }
-
     acc / ((times.len() - start) as u32)
+}
+
+fn median_duration(times: &[Duration]) -> Duration {
+    assert!(!times.is_empty());
+
+    let mut sorted = times.to_vec();
+    sorted.sort_unstable();
+
+    let middle = sorted.len() / 2;
+    if sorted.len() % 2 == 1 {
+        sorted[middle]
+    } else {
+        (sorted[middle - 1] + sorted[middle]) / 2
+    }
+}
+
+fn duration_ms(duration: Duration) -> f64 {
+    duration.as_secs_f64() * 1000.0
 }
 
 // -----------------------------------------------------------------------------
@@ -288,13 +433,16 @@ fn avg_after_warmup(times: &[Duration]) -> Duration {
 
 fn ensure_output_dir() {
     if !Path::new(OUTPUT_DIR).exists() {
-        create_dir_all(OUTPUT_DIR).expect("failed to create benchmark output directory");
+        create_dir_all(OUTPUT_DIR)
+            .expect("failed to create benchmark output directory");
     }
 }
 
 fn output_path(args: &Args) -> String {
     format!(
-        "{OUTPUT_DIR}/qapcs_mersenne127_ratehalf100_sec{}_df{}_th{}.csv",
+        "{}/qapcs_full_mersenne127_rho{}_sec{}_df{}_th{}.csv",
+        OUTPUT_DIR,
+        <BenchSpec as QAPCSSpec>::inverse_rate(),
         <BenchSpec as QAPCSSpec>::security_bits(),
         <BenchSpec as QAPCSSpec>::distance_failure_bits(),
         args.threads,
@@ -303,28 +451,38 @@ fn output_path(args: &Args) -> String {
 
 fn write_header_if_new(path: &str) {
     if !Path::new(path).exists() {
-        let mut f = File::create(path).expect("failed to create output csv");
+        let mut file =
+            File::create(path).expect("failed to create output CSV");
 
         writeln!(
-            &mut f,
-            "field,total_k,row_log,log_rows,num_rows,row_len,codeword_len,inverse_rate,security_bits,distance_failure_bits,delta,queries,proximity_reps,threads,commit_ms,open_ms,verify_ms,proof_bytes,proof_kb"
+            &mut file,
+            concat!(
+                "field,protocol,total_k,row_log,log_rows,num_rows,row_len,",
+                "codeword_len,inverse_rate,security_bits,distance_failure_bits,",
+                "delta,queries,proximity_reps,proof_bytes,proof_kb,threads,",
+                "setup_ms,trim_ms,eval_prepare_ms,commit_ms,open_ms,verify_ms"
+            )
         )
         .unwrap();
     }
 }
 
 fn append_result(path: &str, result: &BenchResult) {
-    let mut f = OpenOptions::new()
+    let mut file = OpenOptions::new()
         .append(true)
         .open(path)
-        .expect("failed to open output csv");
+        .expect("failed to open output CSV");
 
     let proof_kb = result.proof_bytes as f64 / 1024.0;
 
     writeln!(
-        &mut f,
-        "{},{},{},{},{},{},{},{},{},{},{:.8},{},{},{},{},{},{},{},{:.2}",
+        &mut file,
+        concat!(
+            "{},{},{},{},{},{},{},{},{},{},{},{:.8},{},{},{},{:.2},{},",
+            "{:.3},{:.3},{:.3},{:.3},{:.3},{:.3}"
+        ),
         result.field,
+        result.protocol,
         result.total_k,
         result.row_log,
         result.log_rows,
@@ -337,12 +495,15 @@ fn append_result(path: &str, result: &BenchResult) {
         result.delta,
         result.queries,
         result.proximity_reps,
-        result.threads,
-        result.commit_avg.as_millis(),
-        result.open_avg.as_millis(),
-        result.verify_avg.as_millis(),
         result.proof_bytes,
         proof_kb,
+        result.threads,
+        duration_ms(result.setup_time),
+        duration_ms(result.trim_time),
+        duration_ms(result.eval_prepare_time),
+        duration_ms(result.commit_time),
+        duration_ms(result.open_time),
+        duration_ms(result.verify_time),
     )
     .unwrap();
 }
@@ -368,34 +529,44 @@ impl Args {
         while let Some(flag) = iter.next() {
             match flag.as_str() {
                 "--total-k" => {
-                    let value = iter.next().expect("--total-k needs a value, e.g. 20..30");
+                    let value = iter
+                        .next()
+                        .expect("--total-k needs a value, e.g. 20..=28");
                     let (start, end) = parse_range_inclusive(&value);
                     args.total_k_start = start;
                     args.total_k_end = end;
                 }
                 "--samples" => {
-                    let value = iter.next().expect("--samples needs a value");
-                    args.samples = value.parse().expect("invalid --samples value");
+                    let value =
+                        iter.next().expect("--samples needs a value");
+                    args.samples =
+                        value.parse().expect("invalid --samples value");
                 }
                 "--threads" => {
-                    let value = iter.next().expect("--threads needs a value");
-                    args.threads = value.parse().expect("invalid --threads value");
+                    let value =
+                        iter.next().expect("--threads needs a value");
+                    args.threads =
+                        value.parse().expect("invalid --threads value");
                 }
                 "--bench" => {
-                    // Defensive only: `--bench <name>` should normally be consumed by Cargo
-                    // before the `--` separator, but ignore it if accidentally forwarded.
+                    // Defensive only. Cargo normally consumes this.
                     let _ = iter.next();
                 }
-                "--help" | "-h" => {
-                    print_help_and_exit();
+                "--smoke" => {
+                    args.total_k_start = 12;
+                    args.total_k_end = 12;
+                    args.samples = 1;
+                    args.threads = args.threads.min(8);
                 }
-                other => {
-                    panic!("unknown argument: {other}");
-                }
+                "--help" | "-h" => print_help_and_exit(),
+                other => panic!("unknown argument: {other}"),
             }
         }
 
-        assert!(args.total_k_start <= args.total_k_end, "invalid total-k range");
+        assert!(
+            args.total_k_start <= args.total_k_end,
+            "invalid total-k range"
+        );
         assert!(args.samples >= 1, "samples must be positive");
         assert!(args.threads >= 1, "threads must be positive");
 
@@ -410,12 +581,14 @@ fn parse_range_inclusive(value: &str) -> (usize, usize) {
             end.parse().expect("invalid range end"),
         );
     }
+
     if let Some((start, end)) = value.split_once("..") {
         return (
             start.parse().expect("invalid range start"),
             end.parse().expect("invalid range end"),
         );
     }
+
     let single = value.parse().expect("invalid total-k value");
     (single, single)
 }
@@ -424,18 +597,25 @@ fn seed_from(total_k: usize, sample: usize) -> [u8; 32] {
     let mut seed = [0u8; 32];
     seed[0..8].copy_from_slice(&(total_k as u64).to_le_bytes());
     seed[8..16].copy_from_slice(&(sample as u64).to_le_bytes());
-    seed[16..24].copy_from_slice(&0x5141_5043_535f_4245u64.to_le_bytes()); // "QAPCS_BE"
-    seed[24..32].copy_from_slice(&0x4e43_484d_4152_4b21u64.to_le_bytes()); // "NCHMARK!"
+    seed[16..24]
+        .copy_from_slice(&0x5141_5043_535f_4245u64.to_le_bytes());
+    seed[24..32]
+        .copy_from_slice(&0x4e43_484d_4152_4b21u64.to_le_bytes());
     seed
 }
 
 fn print_help_and_exit() -> ! {
     println!(
-        "Usage: qapcs_bench [--total-k 20..30] [--samples 5] [--threads 32]\n\
-         \n\
-         Writes one averaged CSV row per total_k to ./bench_data/qapcs/.\n\
-         For samples >= 5, the first two samples are discarded and the remaining samples are averaged.\n\
-         Proof size is the opening transcript size in bytes."
+        "QAPCS full-opening benchmark\n\n\
+         Smoke test:\n\
+           cargo bench -p benchmark --bench qapcs_bench -- --smoke --threads 8\n\n\
+         Paper-scale test:\n\
+           cargo bench -p benchmark --bench qapcs_bench -- \\\n             --total-k 20..=28 --samples 5 --threads 32\n\n\
+         Options:\n\
+           --total-k <k|a..b|a..=b>\n\
+           --samples <n>\n\
+           --threads <n>\n\
+           --smoke\n"
     );
     std::process::exit(0)
 }

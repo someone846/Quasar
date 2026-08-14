@@ -20,6 +20,6 @@ path = "src/bin/qa_encode_cpu_gpu.rs"
 required-features = ["cuda"]
 
 [[bin]]
-name = "quasar_commit_cpu_cuda"
+name = "qa_commit_cpu_cuda"
 path = "src/bin/quasar_commit_cpu_cuda.rs"
 required-features = ["cuda"]

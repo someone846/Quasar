@@ -59,5 +59,9 @@ name = "qapcs_bench"
 path = "benches/qapcs_bench.rs"
 harness = false
 
+[[bench]]
+name = "quasar_bench"
+harness = false
+
 [[bin]]
 name = "plotter"

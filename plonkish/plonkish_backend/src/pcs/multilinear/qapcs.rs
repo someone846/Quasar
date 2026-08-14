@@ -5,8 +5,15 @@
 //! 1. reshape multilinear evaluations into a row-major matrix;
 //! 2. encode each row;
 //! 3. Merkle-commit to encoded columns;
-//! 4. during opening, send random folded rows and randomly opened columns;
-//! 5. the verifier locally re-encodes each folded row and checks the opened columns.
+//! 4. during a full opening, send random proximity-folded rows;
+//! 5. send the evaluation-folded row determined by the public evaluation point;
+//! 6. sample and open encoded columns from the committed matrix;
+//! 7. the verifier locally re-encodes every folded row, checks all sampled
+//!    columns, and checks that the evaluation-folded message evaluates to the
+//!    public claimed value.
+//!
+//! Thus `open`/`verify` implement a full multilinear opening, not merely a
+//! proximity test.
 //!
 //! The only protocol-level replacement is the row code: instead of the GLSTW21
 //! Brakedown/RAA code, each row is encoded by the QA code
@@ -41,7 +48,7 @@ use crate::{
 };
 
 use rand::RngCore;
-use std::{borrow::Cow, fmt::Debug, marker::PhantomData, mem::size_of, slice};
+use std::{fmt::Debug, marker::PhantomData, mem::size_of, slice};
 
 // -----------------------------------------------------------------------------
 // Public PCS type
@@ -217,8 +224,7 @@ pub fn qabase_distance_failure_log2(
             - denom_log
             - log_p_minus_one;
 
-    let log_bound2 = log2_add(log_term1_a, log_term1_b)
-        .min(log2_add(log_term2_a, log_term2_b));
+    let log_bound2 = log2_add(log_term2_a, log_term2_b);
 
     log_bound1.min(log_bound2)
 }
@@ -663,6 +669,270 @@ impl<F: PrimeField, H: Hash> AsRef<[Output<H>]> for MultilinearQAPCSCommitment<F
     }
 }
 
+
+// -----------------------------------------------------------------------------
+// Full-opening helpers
+// -----------------------------------------------------------------------------
+
+/// Compute a row-linear combination of the row-major evaluation matrix.
+///
+/// The polynomial evaluations are interpreted as
+///
+///     matrix[row][column] = evals[row * row_len + column].
+///
+/// `coeffs` has one coefficient per matrix row and `combined_row` has
+/// `row_len` entries.
+fn combine_message_rows<F: PrimeField>(
+    evals: &[F],
+    num_rows: usize,
+    row_len: usize,
+    coeffs: &[F],
+    combined_row: &mut [F],
+) -> Result<(), Error> {
+    if coeffs.len() != num_rows
+        || combined_row.len() != row_len
+        || evals.len() != num_rows * row_len
+    {
+        return Err(Error::InvalidPcsParam(
+            "invalid QAPCS row-combination dimensions".to_string(),
+        ));
+    }
+
+    parallelize(combined_row, |(combined_row, offset)| {
+        combined_row
+            .iter_mut()
+            .zip(offset..)
+            .for_each(|(combined, column)| {
+                let mut acc = F::ZERO;
+                for (row, coeff) in coeffs.iter().enumerate() {
+                    acc += *coeff * evals[row * row_len + column];
+                }
+                *combined = acc;
+            });
+    });
+
+    Ok(())
+}
+
+/// Validate the prover-side commitment state used to answer Merkle openings.
+fn validate_qapcs_commitment_state<F: PrimeField, H: Hash>(
+    pp: &MultilinearQAPCSParams<F>,
+    comm: &MultilinearQAPCSCommitment<F, H>,
+) -> Result<(), Error> {
+    let codeword_len = pp.codeword_len();
+    let expected_intermediate_hashes = 2 * codeword_len - 2;
+
+    if comm.rows.len() != pp.num_rows
+        || comm.rows.iter().any(|row| row.len() != codeword_len)
+        || comm.intermediate_hashes.len() != expected_intermediate_hashes
+    {
+        return Err(Error::InvalidPcsParam(
+            "invalid QAPCS prover commitment state".to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
+/// Full Brakedown-style QAPCS opening.
+///
+/// This proves both:
+///
+/// 1. proximity: random row combinations of the committed encoded matrix are
+///    valid QA codewords and agree with sampled committed columns;
+/// 2. evaluation: the deterministic row combination
+///
+///        p = eq(z_row, ·)^T M
+///
+///    is a valid QA codeword, agrees with the same sampled columns, and
+///
+///        p(z_col) = claimed_value.
+///
+/// The evaluation-folded row is sent before the Merkle query positions are
+/// sampled, so it is bound by the sampled-column test.
+pub fn qapcs_open_full<F, H>(
+    pp: &MultilinearQAPCSParams<F>,
+    poly: &MultilinearPolynomial<F>,
+    comm: &MultilinearQAPCSCommitment<F, H>,
+    point: &Point<F, MultilinearPolynomial<F>>,
+    eval: &F,
+    transcript: &mut impl TranscriptWrite<Output<H>, F>,
+) -> Result<(), Error>
+where
+    F: PrimeField + Serialize + DeserializeOwned,
+    H: Hash,
+{
+    validate_input("open", pp.num_vars(), [poly], [point])?;
+    validate_qapcs_commitment_state(pp, comm)?;
+
+    let row_len = pp.row_len();
+    let codeword_len = pp.codeword_len();
+    debug_assert!(codeword_len.is_power_of_two());
+
+    // For row-major flattening, the first variables index columns and the last
+    // log2(num_rows) variables index rows.
+    let (row_weights, column_weights) = point_to_tensor(pp.num_rows, point);
+
+    // Construct and check the deterministic evaluation-folded row first.
+    // The row is written later, after the random proximity rows, preserving the
+    // transcript order of the original implementation.
+    let mut evaluation_row = vec![F::ZERO; row_len];
+    combine_message_rows(
+        poly.evals(),
+        pp.num_rows,
+        row_len,
+        &row_weights,
+        &mut evaluation_row,
+    )?;
+
+    if inner_product(&evaluation_row, &column_weights) != *eval {
+        return Err(Error::InvalidPcsOpen(
+            "claimed QAPCS evaluation does not match the polynomial".to_string(),
+        ));
+    }
+
+    // Random proximity-folded rows.
+    if pp.num_rows > 1 {
+        let mut combined_row = vec![F::ZERO; row_len];
+        for _ in 0..pp.qa.num_proximity_testing() {
+            let coeffs = transcript.squeeze_challenges(pp.num_rows);
+            combine_message_rows(
+                poly.evals(),
+                pp.num_rows,
+                row_len,
+                &coeffs,
+                &mut combined_row,
+            )?;
+            transcript.write_field_elements(&combined_row)?;
+        }
+    }
+
+    // Full evaluation branch: send p = eq(z_row,·)^T M.
+    transcript.write_field_elements(&evaluation_row)?;
+
+    // The Merkle query challenges are sampled after all folded rows have been
+    // absorbed into the transcript.
+    let depth = codeword_len.ilog2() as usize;
+    for _ in 0..pp.qa.num_column_opening() {
+        let column = squeeze_challenge_idx(transcript, codeword_len);
+
+        transcript.write_field_elements(
+            comm.rows.iter().map(|row| &row[column]),
+        )?;
+
+        let mut offset = 0;
+        for (idx, width) in (1..=depth)
+            .rev()
+            .map(|depth| 1usize << depth)
+            .enumerate()
+        {
+            let neighbor_idx = (column >> idx) ^ 1;
+            transcript.write_commitment(
+                &comm.intermediate_hashes[offset + neighbor_idx],
+            )?;
+            offset += width;
+        }
+    }
+
+    Ok(())
+}
+
+/// Verify the full Brakedown-style QAPCS opening.
+pub fn qapcs_verify_full<F, H>(
+    vp: &MultilinearQAPCSParams<F>,
+    comm: &MultilinearQAPCSCommitment<F, H>,
+    point: &Point<F, MultilinearPolynomial<F>>,
+    eval: &F,
+    transcript: &mut impl TranscriptRead<Output<H>, F>,
+) -> Result<(), Error>
+where
+    F: PrimeField + Serialize + DeserializeOwned,
+    H: Hash,
+{
+    validate_input("verify", vp.num_vars(), [], [point])?;
+
+    let row_len = vp.row_len();
+    let codeword_len = vp.codeword_len();
+    debug_assert!(codeword_len.is_power_of_two());
+
+    let (row_weights, column_weights) = point_to_tensor(vp.num_rows, point);
+    let mut combined_rows =
+        Vec::with_capacity(vp.qa.num_proximity_testing() + 1);
+
+    // Random proximity-folded rows.
+    if vp.num_rows > 1 {
+        for _ in 0..vp.qa.num_proximity_testing() {
+            let coeffs = transcript.squeeze_challenges(vp.num_rows);
+            let mut encoded_row = transcript.read_field_elements(row_len)?;
+            encoded_row.resize(codeword_len, F::ZERO);
+            vp.qa.encode(&mut encoded_row);
+            combined_rows.push((coeffs, encoded_row));
+        }
+    }
+
+    // Deterministic evaluation-folded row.
+    let evaluation_message_row = transcript.read_field_elements(row_len)?;
+    if inner_product(&evaluation_message_row, &column_weights) != *eval {
+        return Err(Error::InvalidPcsOpen(
+            "QAPCS evaluation consistency failure".to_string(),
+        ));
+    }
+
+    let mut evaluation_encoded_row = evaluation_message_row;
+    evaluation_encoded_row.resize(codeword_len, F::ZERO);
+    vp.qa.encode(&mut evaluation_encoded_row);
+    combined_rows.push((row_weights, evaluation_encoded_row));
+
+    // All folded rows are now fixed. Sample and verify the committed columns.
+    let depth = codeword_len.ilog2() as usize;
+    for _ in 0..vp.qa.num_column_opening() {
+        let column = squeeze_challenge_idx(transcript, codeword_len);
+        let items = transcript.read_field_elements(vp.num_rows)?;
+        let path = transcript.read_commitments(depth)?;
+
+        for (coeffs, encoded_row) in &combined_rows {
+            let projected = if vp.num_rows > 1 {
+                inner_product(coeffs, &items)
+            } else {
+                items[0]
+            };
+
+            if projected != encoded_row[column] {
+                return Err(Error::InvalidPcsOpen(
+                    "QAPCS folded-column consistency failure".to_string(),
+                ));
+            }
+        }
+
+        let mut hasher = H::new();
+        let mut output = {
+            for item in &items {
+                hasher.update_field_element(item);
+            }
+            hasher.finalize_fixed_reset()
+        };
+
+        for (idx, neighbor) in path.iter().enumerate() {
+            if (column >> idx) & 1 == 0 {
+                hasher.update(&output);
+                hasher.update(neighbor);
+            } else {
+                hasher.update(neighbor);
+                hasher.update(&output);
+            }
+            output = hasher.finalize_fixed_reset();
+        }
+
+        if &output != comm.root() {
+            return Err(Error::InvalidPcsOpen(
+                "invalid QAPCS Merkle opening".to_string(),
+            ));
+        }
+    }
+
+    Ok(())
+}
+
 // -----------------------------------------------------------------------------
 // PolynomialCommitmentScheme implementation
 // -----------------------------------------------------------------------------
@@ -798,62 +1068,14 @@ where
         eval: &F,
         transcript: &mut impl TranscriptWrite<Self::CommitmentChunk, F>,
     ) -> Result<(), Error> {
-        validate_input("open", pp.num_vars(), [poly], [point])?;
-
-        let row_len = pp.qa.row_len();
-        let codeword_len = pp.qa.codeword_len();
-
-        let (t_0, t_1) = point_to_tensor(pp.num_rows, point);
-        let t_0_combined_row = if pp.num_rows > 1 {
-            let combine = |combined_row: &mut [F], coeffs: &[F]| {
-                parallelize(combined_row, |(combined_row, offset)| {
-                    combined_row.iter_mut().zip(offset..).for_each(|(combined, column)| {
-                        *combined = F::ZERO;
-                        coeffs
-                            .iter()
-                            .zip(poly.evals().iter().skip(column).step_by(row_len))
-                            .for_each(|(coeff, eval)| {
-                                *combined += *coeff * eval;
-                            });
-                    })
-                });
-            };
-
-            let mut combined_row = vec![F::ZERO; row_len];
-
-            for _ in 0..pp.qa.num_proximity_testing() {
-                let coeffs = transcript.squeeze_challenges(pp.num_rows);
-                combine(&mut combined_row, &coeffs);
-                transcript.write_field_elements(&combined_row)?;
-            }
-
-            combine(&mut combined_row, &t_0);
-            Cow::Owned(combined_row)
-        } else {
-            Cow::Borrowed(poly.evals())
-        };
-
-        transcript.write_field_elements(t_0_combined_row.iter())?;
-        if cfg!(feature = "sanity-check") {
-            assert_eq!(inner_product(t_0_combined_row.as_ref(), &t_1), *eval);
-        }
-
-        // Open Merkle tree at random encoded-column indices.
-        let depth = codeword_len.next_power_of_two().ilog2() as usize;
-        for _ in 0..pp.qa.num_column_opening() {
-            let column = squeeze_challenge_idx(transcript, codeword_len);
-
-            transcript.write_field_elements(comm.rows.iter().map(|row| &row[column]))?;
-
-            let mut offset = 0;
-            for (idx, width) in (1..=depth).rev().map(|depth| 1 << depth).enumerate() {
-                let neighbor_idx = (column >> idx) ^ 1;
-                transcript.write_commitment(&comm.intermediate_hashes[offset + neighbor_idx])?;
-                offset += width;
-            }
-        }
-
-        Ok(())
+        qapcs_open_full::<F, H>(
+            pp,
+            poly,
+            comm,
+            point,
+            eval,
+            transcript,
+        )
     }
 
     fn batch_open<'a>(
@@ -903,86 +1125,13 @@ where
         eval: &F,
         transcript: &mut impl TranscriptRead<Self::CommitmentChunk, F>,
     ) -> Result<(), Error> {
-        validate_input("verify", vp.num_vars(), [], [point])?;
-
-        let row_len = vp.qa.row_len();
-        let codeword_len = vp.qa.codeword_len();
-
-        let (t_0, t_1) = point_to_tensor(vp.num_rows, point);
-        let mut combined_rows = Vec::with_capacity(vp.qa.num_proximity_testing() + 1);
-
-        if vp.num_rows > 1 {
-            for _ in 0..vp.qa.num_proximity_testing() {
-                let coeffs = transcript.squeeze_challenges(vp.num_rows);
-                let mut combined_row = transcript.read_field_elements(row_len)?;
-                combined_row.resize(codeword_len, F::ZERO);
-                vp.qa.encode(&mut combined_row);
-                combined_rows.push((coeffs, combined_row));
-            }
-        }
-
-        combined_rows.push({
-            let mut combined_row = transcript.read_field_elements(row_len)?;
-            combined_row.resize(codeword_len, F::ZERO);
-            vp.qa.encode(&mut combined_row);
-            (t_0, combined_row)
-        });
-
-        let depth = codeword_len.next_power_of_two().ilog2() as usize;
-
-        for _ in 0..vp.qa.num_column_opening() {
-            let column = squeeze_challenge_idx(transcript, codeword_len);
-            let items = transcript.read_field_elements(vp.num_rows)?;
-            let path = transcript.read_commitments(depth)?;
-
-            // Check all folded-row projections against the opened encoded column.
-            for (coeff, encoded) in combined_rows.iter() {
-                let item = if vp.num_rows > 1 {
-                    inner_product(coeff, &items)
-                } else {
-                    items[0]
-                };
-                if item != encoded[column] {
-                    return Err(Error::InvalidPcsOpen("Proximity failure".to_string()));
-                }
-            }
-
-            // Verify Merkle tree opening.
-            let mut hasher = H::new();
-            let mut output = {
-                for item in items.iter() {
-                    hasher.update_field_element(item);
-                }
-
-                hasher.finalize_fixed_reset()
-            };
-            for (idx, neighbor) in path.iter().enumerate() {
-                if (column >> idx) & 1 == 0 {
-                    hasher.update(&output);
-                    hasher.update(neighbor);
-                } else {
-                    hasher.update(neighbor);
-                    hasher.update(&output);
-                }
-                output = hasher.finalize_fixed_reset();
-            }
-            if &output != comm.root() {
-                return Err(Error::InvalidPcsOpen(
-                    "Invalid merkle tree opening".to_string(),
-                ));
-            }
-        }
-
-        // Verify evaluation consistency using the final folded message row.
-        let t_0_combined_row = combined_rows
-            .last()
-            .map(|(_, combined_row)| &combined_row[..row_len])
-            .unwrap();
-        if inner_product(t_0_combined_row, &t_1) != *eval {
-            return Err(Error::InvalidPcsOpen("Consistency failure".to_string()));
-        }
-
-        Ok(())
+        qapcs_verify_full::<F, H>(
+            vp,
+            comm,
+            point,
+            eval,
+            transcript,
+        )
     }
 
     fn batch_verify<'a>(
@@ -1013,22 +1162,52 @@ where
 // Helpers
 // -----------------------------------------------------------------------------
 
-fn point_to_tensor<F: PrimeField>(num_rows: usize, point: &[F]) -> (Vec<F>, Vec<F>) {
+fn point_to_tensor<F: PrimeField>(
+    num_rows: usize,
+    point: &[F],
+) -> (Vec<F>, Vec<F>) {
     assert!(num_rows.is_power_of_two());
-    let (hi, lo) = point.split_at(point.len() - num_rows.ilog2() as usize);
-    let t_0 = MultilinearPolynomial::eq_xy(lo).into_evals();
-    let t_1 = MultilinearPolynomial::eq_xy(hi).into_evals();
-    (t_0, t_1)
+
+    let log_rows = num_rows.ilog2() as usize;
+    assert!(
+        point.len() >= log_rows,
+        "evaluation point is too short for the QAPCS row dimension"
+    );
+
+    // Row-major flattening:
+    //
+    //     flat[row * row_len + column].
+    //
+    // MLE coordinates are little-endian, so the first coordinates index
+    // columns and the last log_rows coordinates index rows.
+    let (column_point, row_point) =
+        point.split_at(point.len() - log_rows);
+
+    let row_weights =
+        MultilinearPolynomial::eq_xy(row_point).into_evals();
+    let column_weights =
+        MultilinearPolynomial::eq_xy(column_point).into_evals();
+
+    (row_weights, column_weights)
 }
 
 fn squeeze_challenge_idx<F: PrimeField>(
     transcript: &mut impl FieldTranscript<F>,
     cap: usize,
 ) -> usize {
+    assert!(cap > 0);
+
     let challenge = transcript.squeeze_challenge();
-    let mut bytes = [0; size_of::<u32>()];
-    bytes.copy_from_slice(&challenge.to_repr().as_ref()[..size_of::<u32>()]);
-    u32::from_le_bytes(bytes) as usize % cap
+    let repr = challenge.to_repr();
+    let bytes = repr.as_ref();
+    let take = bytes.len().min(size_of::<usize>());
+
+    let mut index = 0usize;
+    for (i, byte) in bytes.iter().take(take).enumerate() {
+        index |= (*byte as usize) << (8 * i);
+    }
+
+    index % cap
 }
 
 // -----------------------------------------------------------------------------
@@ -1041,9 +1220,14 @@ mod test {
 
     use crate::{
         pcs::multilinear::test::{run_batch_commit_open_verify, run_commit_open_verify},
-        util::{hash::Blake2s, transcript::Blake2sTranscript},
+        util::{
+            hash::Blake2s,
+            transcript::{Blake2sTranscript, InMemoryTranscript},
+        },
     };
     use halo2_curves::bn256::Fr;
+    use rand_chacha::{rand_core::SeedableRng, ChaCha8Rng};
+    use std::io::Cursor;
 
     #[derive(Debug)]
     struct TestSpec;
@@ -1073,6 +1257,77 @@ mod test {
     fn batch_commit_open_verify() {
         run_batch_commit_open_verify::<_, Pcs, Blake2sTranscript<_>>();
     }
+
+    #[test]
+    fn point_split_matches_row_major_mle() {
+        let num_rows = 4usize;
+        let row_len = 8usize;
+        let evals = (0..num_rows * row_len)
+            .map(|i| Fr::from((i + 1) as u64))
+            .collect::<Vec<_>>();
+        let point = vec![
+            Fr::from(2u64),
+            Fr::from(3u64),
+            Fr::from(5u64),
+            Fr::from(7u64),
+            Fr::from(11u64),
+        ];
+
+        let direct =
+            MultilinearPolynomial::new(evals.clone()).evaluate(&point);
+        let (row_weights, column_weights) =
+            point_to_tensor(num_rows, &point);
+
+        let mut combined_row = vec![Fr::ZERO; row_len];
+        combine_message_rows(
+            &evals,
+            num_rows,
+            row_len,
+            &row_weights,
+            &mut combined_row,
+        )
+        .unwrap();
+
+        assert_eq!(
+            direct,
+            inner_product(&combined_row, &column_weights),
+        );
+    }
+
+    #[test]
+    fn full_open_rejects_wrong_claimed_value() {
+        type TestTranscript =
+            Blake2sTranscript<Cursor<Vec<u8>>>;
+
+        let poly_size = 1usize << 8;
+        let mut rng = ChaCha8Rng::from_seed([42u8; 32]);
+        let param = Pcs::setup(poly_size, 1, &mut rng).unwrap();
+        let (pp, _) = Pcs::trim(&param, poly_size, 1).unwrap();
+
+        let poly = MultilinearPolynomial::new(
+            (0..poly_size)
+                .map(|_| Fr::random(&mut rng))
+                .collect(),
+        );
+        let comm = Pcs::commit(&pp, &poly).unwrap();
+        let point = (0..pp.num_vars())
+            .map(|_| Fr::random(&mut rng))
+            .collect::<Vec<_>>();
+        let actual = poly.evaluate(&point);
+        let wrong = actual + Fr::ONE;
+
+        let mut transcript = TestTranscript::new(());
+        let result = Pcs::open(
+            &pp,
+            &poly,
+            &comm,
+            &point,
+            &wrong,
+            &mut transcript,
+        );
+        assert!(result.is_err());
+    }
+
 
     #[test]
     fn shape_uses_rate_half() {

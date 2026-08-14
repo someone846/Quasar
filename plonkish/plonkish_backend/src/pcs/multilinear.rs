@@ -7,6 +7,7 @@ use crate::{
 pub mod blaze;
 pub mod qabase;
 pub mod qapcs;
+pub mod quasar;
 
 mod brakedown;
 mod gemini;
