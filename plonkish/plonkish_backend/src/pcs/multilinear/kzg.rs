@@ -356,9 +356,6 @@ where
             .chain(quotients.iter().cloned())
             .collect_vec();
 
-
-
-
         M::pairings_product_is_identity(&lhs.iter().zip_eq(rhs.iter()).collect_vec())
             .then_some(())
             .ok_or_else(|| Error::InvalidPcsOpen("Invalid multilinear KZG open".to_string()))

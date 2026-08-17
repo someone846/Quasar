@@ -133,10 +133,7 @@ extern "C" {
     fn qa_gpu_host_unregister_m127_mont(values: *mut M127Mont) -> c_int;
     fn qa_gpu_host_register_bytes(values: *mut c_void, bytes: usize) -> c_int;
     fn qa_gpu_host_unregister_bytes(values: *mut c_void) -> c_int;
-    fn qa_gpu_create_device_commitment_m127_mont(
-        rows: usize,
-        columns: usize,
-    ) -> *mut c_void;
+    fn qa_gpu_create_device_commitment_m127_mont(rows: usize, columns: usize) -> *mut c_void;
     fn qa_gpu_destroy_device_commitment_m127_mont(commitment: *mut c_void);
     fn qa_gpu_encode_store_m127_mont(
         context: *mut c_void,
@@ -259,15 +256,20 @@ unsafe impl Sync for GpuQaDeviceOutput {}
 /// per-transfer pageable-memory staging from the H2D path.
 pub struct GpuQaInput {
     values: Vec<Mersenne127>,
+    row_len: usize,
     registered: bool,
     setup_timing: GpuQaInputSetupTiming,
 }
 
 impl GpuQaInput {
-    fn new(mut values: Vec<Mersenne127>) -> Result<Self, String> {
+    fn new(mut values: Vec<Mersenne127>, row_len: usize) -> Result<Self, String> {
+        if row_len == 0 || values.len() % row_len != 0 {
+            return Err("GPU QA input has an invalid row length".to_owned());
+        }
         if values.is_empty() {
             return Ok(Self {
                 values,
+                row_len,
                 registered: false,
                 setup_timing: GpuQaInputSetupTiming::default(),
             });
@@ -275,10 +277,7 @@ impl GpuQaInput {
 
         let register_start = Instant::now();
         let status = unsafe {
-            qa_gpu_host_register_m127_mont(
-                values.as_mut_ptr().cast::<M127Mont>(),
-                values.len(),
-            )
+            qa_gpu_host_register_m127_mont(values.as_mut_ptr().cast::<M127Mont>(), values.len())
         };
         let pin_registration = register_start.elapsed();
         if status != 0 {
@@ -290,6 +289,7 @@ impl GpuQaInput {
 
         Ok(Self {
             values,
+            row_len,
             registered: true,
             setup_timing: GpuQaInputSetupTiming { pin_registration },
         })
@@ -309,6 +309,25 @@ impl GpuQaInput {
 
     pub fn setup_timing(&self) -> &GpuQaInputSetupTiming {
         &self.setup_timing
+    }
+}
+
+impl QACodewordRows<Mersenne127> for GpuQaInput {
+    fn num_rows(&self) -> usize {
+        self.values.len() / self.row_len
+    }
+
+    fn num_cols(&self) -> usize {
+        self.row_len
+    }
+
+    fn row(&self, row_index: usize) -> &[Mersenne127] {
+        assert!(
+            row_index < self.num_rows(),
+            "GPU QA input row index out of bounds"
+        );
+        let start = row_index * self.row_len;
+        &self.values[start..start + self.row_len]
     }
 }
 
@@ -364,10 +383,7 @@ impl GpuQaOutput {
 
         let register_start = Instant::now();
         let status = unsafe {
-            qa_gpu_host_register_m127_mont(
-                values.as_mut_ptr().cast::<M127Mont>(),
-                values.len(),
-            )
+            qa_gpu_host_register_m127_mont(values.as_mut_ptr().cast::<M127Mont>(), values.len())
         };
         let pin_registration = register_start.elapsed();
         if status != 0 {
@@ -477,9 +493,7 @@ impl GpuQaDeviceOutput {
     fn new(rows: usize, columns: usize) -> Result<Self, String> {
         let total_start = Instant::now();
         let device_start = Instant::now();
-        let commitment = unsafe {
-            qa_gpu_create_device_commitment_m127_mont(rows, columns)
-        };
+        let commitment = unsafe { qa_gpu_create_device_commitment_m127_mont(rows, columns) };
         let device_allocation = device_start.elapsed();
         let commitment = NonNull::new(commitment).ok_or_else(last_error)?;
 
@@ -512,9 +526,8 @@ impl GpuQaDeviceOutput {
             )
         };
         if query_status != 0 {
-            let _ = unsafe {
-                qa_gpu_host_unregister_bytes(leaf_digests.as_mut_ptr().cast::<c_void>())
-            };
+            let _ =
+                unsafe { qa_gpu_host_unregister_bytes(leaf_digests.as_mut_ptr().cast::<c_void>()) };
             unsafe { qa_gpu_destroy_device_commitment_m127_mont(commitment.as_ptr()) };
             return Err(format!(
                 "failed to pin queried-column output: {}",
@@ -642,10 +655,7 @@ unsafe impl Send for GpuQaEncoder {}
 impl GpuQaEncoder {
     /// Uploads the public QA coefficient vectors in their existing Montgomery
     /// representation and allocates reusable device buffers.
-    pub fn new(
-        params: &QAParams<Mersenne127>,
-        max_batch_rows: usize,
-    ) -> Result<Self, String> {
+    pub fn new(params: &QAParams<Mersenne127>, max_batch_rows: usize) -> Result<Self, String> {
         validate_montgomery_layout()?;
         if params.inverse_rate < 2 || !params.inverse_rate.is_power_of_two() {
             return Err("inverse_rate must be a power of two and at least two".to_owned());
@@ -654,9 +664,7 @@ impl GpuQaEncoder {
             return Err("max_batch_rows is outside the CUDA ABI range".to_owned());
         }
         let row_len = params.e.first().map_or(0, Vec::len);
-        if row_len == 0
-            || !row_len.is_power_of_two()
-            || params.e.iter().any(|e| e.len() != row_len)
+        if row_len == 0 || !row_len.is_power_of_two() || params.e.iter().any(|e| e.len() != row_len)
         {
             return Err(
                 "all QA coefficient vectors must have the same power-of-two length".to_owned(),
@@ -691,11 +699,7 @@ impl GpuQaEncoder {
     pub fn device_name(&self) -> Result<String, String> {
         let mut bytes = vec![0i8; 256];
         let result = unsafe {
-            qa_gpu_device_name_m127_mont(
-                self.context.as_ptr(),
-                bytes.as_mut_ptr(),
-                bytes.len(),
-            )
+            qa_gpu_device_name_m127_mont(self.context.as_ptr(), bytes.as_mut_ptr(), bytes.len())
         };
         if result != 0 {
             return Err(last_error());
@@ -713,10 +717,7 @@ impl GpuQaEncoder {
 
     /// Allocates a reusable complete codeword in device memory plus pinned
     /// host buffers for leaf digests and queried columns.
-    pub fn allocate_device_output(
-        &self,
-        rows: usize,
-    ) -> Result<GpuQaDeviceOutput, String> {
+    pub fn allocate_device_output(&self, rows: usize) -> Result<GpuQaDeviceOutput, String> {
         GpuQaDeviceOutput::new(rows, self.row_len * self.inverse_rate)
     }
 
@@ -724,9 +725,11 @@ impl GpuQaEncoder {
     /// stable allocation for all subsequent H2D transfers.
     pub fn register_input(&self, messages: Vec<Mersenne127>) -> Result<GpuQaInput, String> {
         if messages.is_empty() || messages.len() % self.row_len != 0 {
-            return Err("message length is not a non-zero multiple of the QA row length".to_owned());
+            return Err(
+                "message length is not a non-zero multiple of the QA row length".to_owned(),
+            );
         }
-        GpuQaInput::new(messages)
+        GpuQaInput::new(messages, self.row_len)
     }
 
     /// Encodes row-major messages by transferring the backend's raw
@@ -810,10 +813,7 @@ impl GpuQaEncoder {
             return Err("message length is not a multiple of the QA row length".to_owned());
         }
         let rows = messages.len() / self.row_len;
-        if rows == 0
-            || result.rows != rows
-            || result.columns != self.inverse_rate * self.row_len
-        {
+        if rows == 0 || result.rows != rows || result.columns != self.inverse_rate * self.row_len {
             return Err("GPU device output shape does not match the encoder input".to_owned());
         }
 

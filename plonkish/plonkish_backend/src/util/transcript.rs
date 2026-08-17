@@ -1,7 +1,7 @@
 use crate::{
     util::{
         arithmetic::{fe_mod_from_le_bytes, Coordinates, CurveAffine, PrimeField},
-        hash::{Hash, Keccak256, Output, Update, Blake2s256, Blake2s},
+        hash::{Blake2s, Blake2s256, Hash, Keccak256, Output, Update},
         Itertools,
     },
     Error,
@@ -144,7 +144,7 @@ impl<H: Hash, F: PrimeField, S> FieldTranscript<F> for FiatShamirTranscript<H, S
 impl<H: Hash, F: PrimeField, R: io::Read> FieldTranscriptRead<F> for FiatShamirTranscript<H, R> {
     fn read_field_element(&mut self) -> Result<F, Error> {
         let mut repr = <F as PrimeField>::Repr::default();
-	
+
         self.stream
             .read_exact(repr.as_mut())
             .map_err(|err| Error::Transcript(err.kind(), err.to_string()))?;
@@ -165,8 +165,8 @@ impl<H: Hash, F: PrimeField, W: io::Write> FieldTranscriptWrite<F> for FiatShami
         self.common_field_element(fe)?;
         let mut repr = fe.to_repr();
         repr.as_mut().reverse();
-	let el = repr.as_ref();
-//	println!("field el length {:?}", el.len());
+        let el = repr.as_ref();
+        //	println!("field el length {:?}", el.len());
         self.stream
             .write_all(repr.as_ref())
             .map_err(|err| Error::Transcript(err.kind(), err.to_string()))
@@ -258,12 +258,14 @@ impl<F: PrimeField, R: io::Read> TranscriptRead<Output<Keccak256>, F> for Keccak
         self.stream
             .read_exact(hash.as_mut())
             .map_err(|err| Error::Transcript(err.kind(), err.to_string()))?;
+        self.state.update(&hash);
         Ok(hash)
     }
 }
 
 impl<F: PrimeField, W: io::Write> TranscriptWrite<Output<Keccak256>, F> for Keccak256Transcript<W> {
     fn write_commitment(&mut self, hash: &Output<Keccak256>) -> Result<(), Error> {
+        self.state.update(hash);
         self.stream
             .write_all(hash)
             .map_err(|err| Error::Transcript(err.kind(), err.to_string()))?;
@@ -284,19 +286,20 @@ impl<F: PrimeField, R: io::Read> TranscriptRead<Output<Blake2s>, F> for Blake2sT
         self.stream
             .read_exact(hash.as_mut())
             .map_err(|err| Error::Transcript(err.kind(), err.to_string()))?;
+        self.state.update(&hash);
         Ok(hash)
     }
 }
 
 impl<F: PrimeField, W: io::Write> TranscriptWrite<Output<Blake2s>, F> for Blake2sTranscript<W> {
     fn write_commitment(&mut self, hash: &Output<Blake2s>) -> Result<(), Error> {
+        self.state.update(hash);
         self.stream
             .write_all(hash)
             .map_err(|err| Error::Transcript(err.kind(), err.to_string()))?;
         Ok(())
     }
 }
-
 
 impl<F: PrimeField, S> Transcript<Output<Blake2s256>, F> for Blake2s256Transcript<S> {
     fn common_commitment(&mut self, comm: &Output<Blake2s256>) -> Result<(), Error> {
@@ -311,17 +314,19 @@ impl<F: PrimeField, R: io::Read> TranscriptRead<Output<Blake2s256>, F> for Blake
         self.stream
             .read_exact(hash.as_mut())
             .map_err(|err| Error::Transcript(err.kind(), err.to_string()))?;
+        self.state.update(&hash);
         Ok(hash)
     }
 }
 
-impl<F: PrimeField, W: io::Write> TranscriptWrite<Output<Blake2s256>, F> for Blake2s256Transcript<W> {
+impl<F: PrimeField, W: io::Write> TranscriptWrite<Output<Blake2s256>, F>
+    for Blake2s256Transcript<W>
+{
     fn write_commitment(&mut self, hash: &Output<Blake2s256>) -> Result<(), Error> {
+        self.state.update(hash);
         self.stream
             .write_all(hash)
             .map_err(|err| Error::Transcript(err.kind(), err.to_string()))?;
         Ok(())
     }
 }
-
-

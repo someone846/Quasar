@@ -212,10 +212,22 @@ where
 
     let verify_avg = verify_times[warmup..].iter().copied().sum::<Duration>() / denom;
 
-    append_line("commit_brakedown127_rate2_100", &format!("{}, {}", k, commit_avg.as_millis()));
-    append_line("open_brakedown127_rate2_100", &format!("{}, {}", k, prove_avg.as_millis()));
-    append_line("verify_brakedown127_rate2_100", &format!("{}, {}", k, verify_avg.as_millis()));
-    append_line("size_brakedown127_rate2_100", &format!("{}, {}", k, proof_bytes));
+    append_line(
+        "commit_brakedown127_rate2_100",
+        &format!("{}, {}", k, commit_avg.as_millis()),
+    );
+    append_line(
+        "open_brakedown127_rate2_100",
+        &format!("{}, {}", k, prove_avg.as_millis()),
+    );
+    append_line(
+        "verify_brakedown127_rate2_100",
+        &format!("{}, {}", k, verify_avg.as_millis()),
+    );
+    append_line(
+        "size_brakedown127_rate2_100",
+        &format!("{}, {}", k, proof_bytes),
+    );
 
     append_line(
         "summary_brakedown127_rate2_100.csv",

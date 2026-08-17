@@ -1,25 +1,15 @@
-[package]
-name = "qa-gpu-overlay"
-version = "0.1.0"
-edition = "2021"
-publish = false
-build = "build.rs"
+[workspace]
+members = ["benchmark", "plonkish_backend", "qa_gpu_overlay"]
+resolver = "2"
 
-[features]
-default = []
-cuda = []
+[profile.flamegraph]
+inherits = "release"
+debug = true
+codegen-units = 1
 
-[dependencies]
-plonkish_backend = { path = "../plonkish_backend" }
-rand_chacha = "0.3"
-rayon = "1.10"
+# Remove patch after https://github.com/privacy-scaling-explorations/halo2curves/pull/47 is merged.
+[patch."https://github.com/privacy-scaling-explorations/halo2curves"]
+halo2_curves = { git = "https://github.com/han0110/halo2curves", branch = "feature/hash-to-curve", package = "halo2curves" }
 
-[[bin]]
-name = "qa_encode_cpu_gpu"
-path = "src/bin/qa_encode_cpu_gpu.rs"
-required-features = ["cuda"]
-
-[[bin]]
-name = "quasar_commit_cpu_cuda"
-path = "src/bin/quasar_commit_cpu_cuda.rs"
-required-features = ["cuda"]
+[workspace.dependencies]
+serde = { version = "1.0.152" }

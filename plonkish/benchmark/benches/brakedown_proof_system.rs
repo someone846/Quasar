@@ -55,7 +55,6 @@ fn main() {
 fn bench_hyperplonk_spec1<C: CircuitExt<Fr>>(k: usize) {
     type Brakedown = multilinear::MultilinearBrakedown<Fr, Blake2s256, BrakedownSpec1>;
 
-
     type HyperPlonk = backend::hyperplonk::HyperPlonk<Brakedown>;
 
     let circuit = C::rand(k, std_rng());
@@ -65,7 +64,7 @@ fn bench_hyperplonk_spec1<C: CircuitExt<Fr>>(k: usize) {
 
     let timer = start_timer(|| format!("hyperplonk_setup-{k}"));
     let param = HyperPlonk::setup(&circuit_info, std_rng()).unwrap();
-    let row_len = param.brakedown().row_len();    
+    let row_len = param.brakedown().row_len();
     end_timer(timer);
 
     let timer = start_timer(|| format!("hyperplonk_preprocess-{k}"));
@@ -95,7 +94,6 @@ fn bench_hyperplonk_spec1<C: CircuitExt<Fr>>(k: usize) {
 fn bench_hyperplonk_spec3<C: CircuitExt<Fr>>(k: usize) {
     type Brakedown = multilinear::MultilinearBrakedown<Fr, Blake2s256, BrakedownSpec3>;
 
-
     type HyperPlonk = backend::hyperplonk::HyperPlonk<Brakedown>;
 
     let circuit = C::rand(k, std_rng());
@@ -105,7 +103,7 @@ fn bench_hyperplonk_spec3<C: CircuitExt<Fr>>(k: usize) {
 
     let timer = start_timer(|| format!("hyperplonk_setup-{k}"));
     let param = HyperPlonk::setup(&circuit_info, std_rng()).unwrap();
-    let row_len = param.brakedown().row_len();    
+    let row_len = param.brakedown().row_len();
     end_timer(timer);
 
     let timer = start_timer(|| format!("hyperplonk_preprocess-{k}"));
@@ -134,7 +132,6 @@ fn bench_hyperplonk_spec3<C: CircuitExt<Fr>>(k: usize) {
 fn bench_hyperplonk_spec6<C: CircuitExt<Fr>>(k: usize) {
     type Brakedown = multilinear::MultilinearBrakedown<Fr, Blake2s256, BrakedownSpec6>;
 
-
     type HyperPlonk = backend::hyperplonk::HyperPlonk<Brakedown>;
 
     let circuit = C::rand(k, std_rng());
@@ -144,7 +141,7 @@ fn bench_hyperplonk_spec6<C: CircuitExt<Fr>>(k: usize) {
 
     let timer = start_timer(|| format!("hyperplonk_setup-{k}"));
     let param = HyperPlonk::setup(&circuit_info, std_rng()).unwrap();
-    let row_len = param.brakedown().row_len();    
+    let row_len = param.brakedown().row_len();
     end_timer(timer);
 
     let timer = start_timer(|| format!("hyperplonk_preprocess-{k}"));
@@ -174,7 +171,6 @@ fn bench_hyperplonk_spec6<C: CircuitExt<Fr>>(k: usize) {
 fn size_of_extra_rows(field_size: usize, row_len: usize, batch_size: usize) -> usize {
     (batch_size - 1) * row_len * field_size
 }
-
 
 fn bench_halo2<C: CircuitExt<Fr>>(k: usize) {
     let circuit = C::rand(k, std_rng());
@@ -218,12 +214,12 @@ fn bench_halo2<C: CircuitExt<Fr>>(k: usize) {
 enum System {
     Spec1,
     Spec3,
-    Spec6
+    Spec6,
 }
 
 impl System {
     fn all() -> Vec<System> {
-        vec![System::Spec1,System::Spec3,System::Spec6]
+        vec![System::Spec1, System::Spec3, System::Spec6]
     }
 
     fn output_path(&self) -> String {
@@ -259,11 +255,10 @@ impl System {
     }
 
     fn support(&self, circuit: Circuit) -> bool {
-	match circuit {
-                Circuit::VanillaPlonk | Circuit::Aggregation | Circuit::Sha256 => true,
+        match circuit {
+            Circuit::VanillaPlonk | Circuit::Aggregation | Circuit::Sha256 => true,
         }
     }
-
 
     fn bench(&self, k: usize, circuit: Circuit) {
         if !self.support(circuit) {
@@ -276,18 +271,17 @@ impl System {
         match self {
             System::Spec1 => bench_hyperplonk_spec1::<VanillaPlonk<Fr>>(k),
             System::Spec3 => bench_hyperplonk_spec3::<VanillaPlonk<Fr>>(k),
-            System::Spec6 => bench_hyperplonk_spec6::<VanillaPlonk<Fr>>(k)	    		
+            System::Spec6 => bench_hyperplonk_spec6::<VanillaPlonk<Fr>>(k),
         }
     }
 }
-
 
 impl Display for System {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             System::Spec1 => write!(f, "spec1"),
             System::Spec3 => write!(f, "spec3"),
-            System::Spec6 => write!(f, "spec6"),	    	    
+            System::Spec6 => write!(f, "spec6"),
         }
     }
 }

@@ -1,24 +1,25 @@
-use std::time::Instant;
-use num_traits::Zero;
 use crate::util::avx_int_types::BlazeField;
 use crate::{
     util::{
         arithmetic::{fe_mod_from_le_bytes, Coordinates, CurveAffine, PrimeField},
-        hash::{Hash, Keccak256, Output, Update, Blake2s256, Blake2s},
+        hash::{Blake2s, Blake2s256, Hash, Keccak256, Output, Update},
+        transcript::{
+            FieldTranscript, FieldTranscriptRead, FieldTranscriptWrite, InMemoryTranscript,
+            Transcript, TranscriptRead, TranscriptWrite,
+        },
         Itertools,
-        transcript::{FieldTranscript, FieldTranscriptRead, FieldTranscriptWrite, Transcript, TranscriptRead, TranscriptWrite, InMemoryTranscript}
     },
     Error,
 };
+use num_traits::Zero;
+use std::time::Instant;
 
 use std::{
     fmt::Debug,
     io::{self, Cursor},
 };
 
-
 pub type BlazeBlake2sTranscript<S> = BlazeFiatShamirTranscript<Blake2s, S>;
-
 
 #[derive(Debug, Default)]
 pub struct BlazeFiatShamirTranscript<H, S> {
@@ -39,7 +40,9 @@ impl<H: Hash, F: BlazeField, S> FieldTranscript<F> for BlazeFiatShamirTranscript
     }
 }
 
-impl<H: Hash, F: BlazeField, R: io::Read> FieldTranscriptRead<F> for BlazeFiatShamirTranscript<H, R> {
+impl<H: Hash, F: BlazeField, R: io::Read> FieldTranscriptRead<F>
+    for BlazeFiatShamirTranscript<H, R>
+{
     fn read_field_element(&mut self) -> Result<F, Error> {
         let mut repr = <F as Zero>::zero().to_le_bytes();
         self.stream
@@ -47,12 +50,14 @@ impl<H: Hash, F: BlazeField, R: io::Read> FieldTranscriptRead<F> for BlazeFiatSh
             .map_err(|err| Error::Transcript(err.kind(), err.to_string()))?;
         repr.as_mut().reverse();
         let fe = F::from_le_bytes(repr);
-        self.common_field_element(&fe)?;     
+        self.common_field_element(&fe)?;
         Ok(fe)
     }
 }
 
-impl<H: Hash, F: BlazeField, W: io::Write> FieldTranscriptWrite<F> for BlazeFiatShamirTranscript<H, W> {
+impl<H: Hash, F: BlazeField, W: io::Write> FieldTranscriptWrite<F>
+    for BlazeFiatShamirTranscript<H, W>
+{
     fn write_field_element(&mut self, fe: &F) -> Result<(), Error> {
         self.common_field_element(fe)?;
         let mut repr = fe.to_le_bytes();
@@ -62,8 +67,6 @@ impl<H: Hash, F: BlazeField, W: io::Write> FieldTranscriptWrite<F> for BlazeFiat
             .map_err(|err| Error::Transcript(err.kind(), err.to_string()))
     }
 }
-
-
 
 impl<H: Hash> InMemoryTranscript for BlazeFiatShamirTranscript<H, Cursor<Vec<u8>>> {
     type Param = ();
@@ -84,7 +87,6 @@ impl<H: Hash> InMemoryTranscript for BlazeFiatShamirTranscript<H, Cursor<Vec<u8>
     }
 }
 
-
 impl<F: BlazeField, S> Transcript<Output<Blake2s>, F> for BlazeBlake2sTranscript<S> {
     fn common_commitment(&mut self, comm: &Output<Blake2s>) -> Result<(), Error> {
         self.state.update(comm);
@@ -98,21 +100,19 @@ impl<F: BlazeField, R: io::Read> TranscriptRead<Output<Blake2s>, F> for BlazeBla
         self.stream
             .read_exact(hash.as_mut())
             .map_err(|err| Error::Transcript(err.kind(), err.to_string()))?;
+        self.state.update(&hash);
         Ok(hash)
     }
 }
 
-impl<F: BlazeField, W: io::Write> TranscriptWrite<Output<Blake2s>, F> for BlazeBlake2sTranscript<W> {
+impl<F: BlazeField, W: io::Write> TranscriptWrite<Output<Blake2s>, F>
+    for BlazeBlake2sTranscript<W>
+{
     fn write_commitment(&mut self, hash: &Output<Blake2s>) -> Result<(), Error> {
+        self.state.update(hash);
         self.stream
             .write_all(hash)
             .map_err(|err| Error::Transcript(err.kind(), err.to_string()))?;
         Ok(())
     }
 }
-
-
-
-
-
-

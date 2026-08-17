@@ -2,7 +2,6 @@ use benchmark::{
     espresso,
     halo2::{AggregationCircuit, Sha256Circuit},
 };
-use plonkish_backend::util::transcript::TranscriptRead;
 use espresso_hyperplonk::{prelude::MockCircuit, HyperPlonkSNARK};
 use espresso_subroutines::{MultilinearKzgPCS, PolyIOP, PolynomialCommitmentScheme};
 use halo2_proofs::{
@@ -15,6 +14,7 @@ use halo2_proofs::{
     transcript::{Blake2bRead, Blake2bWrite, TranscriptReadBuffer, TranscriptWriterBuffer},
 };
 use itertools::Itertools;
+use plonkish_backend::util::transcript::TranscriptRead;
 use plonkish_backend::{
     backend::{self, PlonkishBackend, PlonkishCircuit},
     frontend::halo2::{circuit::VanillaPlonk, CircuitExt, Halo2Circuit},
@@ -23,7 +23,7 @@ use plonkish_backend::{
     util::{
         end_timer, start_timer,
         test::std_rng,
-        transcript::{InMemoryTranscript, Blake2sTranscript},
+        transcript::{Blake2sTranscript, InMemoryTranscript},
     },
 };
 use std::{
@@ -69,21 +69,24 @@ fn bench_hyperplonk<C: CircuitExt<Fr>>(k: usize) {
         transcript.into_proof()
     });
 
-    let mut t = Blake2sTranscript::from_proof((),proof.as_slice());
-    let mut t1 = Blake2sTranscript::from_proof((),proof.as_slice());    
+    let mut t = Blake2sTranscript::from_proof((), proof.as_slice());
+    let mut t1 = Blake2sTranscript::from_proof((), proof.as_slice());
     HyperPlonk::verify(&vp, instances, &mut t1, std_rng()).is_ok();
     let end_size = t1.into_proof().len();
 
-    writeln!(&mut (System::HyperPlonk).size_output(), "{:?}", (end_size)*8).unwrap();
-    
+    writeln!(
+        &mut (System::HyperPlonk).size_output(),
+        "{:?}",
+        (end_size) * 8
+    )
+    .unwrap();
 
     let _timer = start_timer(|| format!("hyperplonk_verify-{k}"));
     let accept = sample_verifier(System::HyperPlonk, k, || {
         let mut transcript = Blake2sTranscript::from_proof((), proof.as_slice());
         HyperPlonk::verify(&vp, instances, &mut transcript, std_rng()).is_ok()
-	
     });
-    
+
     assert!(accept);
 }
 
@@ -108,7 +111,6 @@ fn bench_halo2<C: CircuitExt<Fr>>(k: usize) {
         f.finalize()
     };
 
-    
     let verify_proof =
         |c, d, e| verify_proof::<_, VerifierGWC<_>, _, _, _, false>(&param, pk.get_vk(), c, d, e);
 
@@ -119,7 +121,7 @@ fn bench_halo2<C: CircuitExt<Fr>>(k: usize) {
     });
 
     let _timer = start_timer(|| format!("halo2_verify-{k}"));
-    let accept =  {
+    let accept = {
         let mut transcript = Blake2bRead::init(proof.as_slice());
         let strategy = SingleStrategy::new(&param);
         verify_proof(strategy, &instances, &mut transcript).is_ok()
@@ -205,7 +207,7 @@ impl System {
             .append(true)
             .open(self.size_output_path())
             .unwrap()
-    }        
+    }
 
     fn support(&self, circuit: Circuit) -> bool {
         match self {
@@ -224,7 +226,6 @@ impl System {
             println!("skip benchmark on {circuit} with {self} because it's not compatible");
             return;
         }
-
 
         println!("start benchmark on 2^{k} {circuit} with {self}");
 
@@ -323,8 +324,8 @@ fn parse_args() -> (Vec<System>, Circuit, Range<usize>) {
     }
     let mut systems = systems.into_iter().sorted().dedup().collect_vec();
     if systems.is_empty() {
-	systems = vec![System::HyperPlonk];
-//        systems = System::all();
+        systems = vec![System::HyperPlonk];
+        //        systems = System::all();
     };
     (systems, circuit, k_range)
 }
@@ -336,7 +337,7 @@ fn create_output(systems: &[System]) {
     for system in systems {
         File::create(system.output_path()).unwrap();
         File::create(system.verifier_output_path()).unwrap();
-        File::create(system.size_output_path()).unwrap();		
+        File::create(system.size_output_path()).unwrap();
     }
 }
 

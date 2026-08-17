@@ -32,7 +32,10 @@
 //!
 //! but `num_column_opening` is computed from the QABase QA-distance lower bound.
 
-use rayon::{iter::{IntoParallelRefIterator, ParallelIterator}, slice::ParallelSlice};
+use rayon::{
+    iter::{IntoParallelRefIterator, ParallelIterator},
+    slice::ParallelSlice,
+};
 
 use crate::{
     pcs::{multilinear::validate_input, Evaluation, Point, PolynomialCommitmentScheme},
@@ -141,8 +144,7 @@ pub fn qabase_gp(delta: f64, field_bits: usize) -> f64 {
 
     let bits = field_bits as f64;
 
-    1.0 - delta
-        + (delta * delta.log2() + (1.0 - delta) * (1.0 - delta).log2()) / bits
+    1.0 - delta + (delta * delta.log2() + (1.0 - delta) * (1.0 - delta).log2()) / bits
 }
 
 /// log2(2^a + 2^b), computed stably.
@@ -172,40 +174,30 @@ pub fn qabase_distance_failure_log2(
     let log_p = field_bits as f64;
     let log_p_minus_one = field_bits as f64;
 
-    let eps =
-        qabase_gp(delta, field_bits)
-            - (1.0 + log_n / log_p) / (c as f64);
+    let eps = qabase_gp(delta, field_bits) - (1.0 + log_n / log_p) / (c as f64);
 
     if eps <= 0.0 {
         return f64::INFINITY;
     }
 
-    let denom_log =
-        if log_p * (c as f64) * eps < 60.0 {
-            // log2(1 - p^{-c eps})
-            let x = log_p * (c as f64) * eps;
-            (-(-std::f64::consts::LN_2 * x).exp_m1()).log2()
-        } else {
-            0.0
-        };
+    let denom_log = if log_p * (c as f64) * eps < 60.0 {
+        // log2(1 - p^{-c eps})
+        let x = log_p * (c as f64) * eps;
+        (-(-std::f64::consts::LN_2 * x).exp_m1()).log2()
+    } else {
+        0.0
+    };
 
     // Bound 1:
     //
     //   c(c-1)N/(2p^2)
     //     + p^{-ceil((c-1)/(c delta)) c eps}
     //       / ((1 - p^{-c eps})(p - 1)).
-    let log_term1_a =
-        ((c * (c - 1)) as f64 / 2.0).log2()
-            + log_n
-            - 2.0 * log_p;
+    let log_term1_a = ((c * (c - 1)) as f64 / 2.0).log2() + log_n - 2.0 * log_p;
 
-    let threshold1 =
-        (((c - 1) as f64) / ((c as f64) * delta)).ceil();
+    let threshold1 = (((c - 1) as f64) / ((c as f64) * delta)).ceil();
 
-    let log_term1_b =
-        -log_p * threshold1 * (c as f64) * eps
-            - denom_log
-            - log_p_minus_one;
+    let log_term1_b = -log_p * threshold1 * (c as f64) * eps - denom_log - log_p_minus_one;
 
     let log_bound1 = log2_add(log_term1_a, log_term1_b);
 
@@ -214,15 +206,11 @@ pub fn qabase_distance_failure_log2(
     //   cN/p
     //     + p^{-ceil(1/delta) c eps}
     //       / ((1 - p^{-c eps})(p - 1)).
-    let log_term2_a =
-        (c as f64).log2() + log_n - log_p;
+    let log_term2_a = (c as f64).log2() + log_n - log_p;
 
     let threshold2 = (1.0 / delta).ceil();
 
-    let log_term2_b =
-        -log_p * threshold2 * (c as f64) * eps
-            - denom_log
-            - log_p_minus_one;
+    let log_term2_b = -log_p * threshold2 * (c as f64) * eps - denom_log - log_p_minus_one;
 
     let log_bound2 = log2_add(log_term2_a, log_term2_b);
 
@@ -498,11 +486,7 @@ pub struct QACode<F: PrimeField> {
 }
 
 impl<F: PrimeField> QACode<F> {
-    pub fn new_random(
-        shape: &QAPCSShape,
-        inverse_rate: usize,
-        rng: &mut impl RngCore,
-    ) -> Self {
+    pub fn new_random(shape: &QAPCSShape, inverse_rate: usize, rng: &mut impl RngCore) -> Self {
         assert_eq!(shape.codeword_len, inverse_rate * shape.row_len);
         let qa_params = QAParams::<F>::new_random(shape.row_len, inverse_rate, rng);
 
@@ -669,7 +653,6 @@ impl<F: PrimeField, H: Hash> AsRef<[Output<H>]> for MultilinearQAPCSCommitment<F
     }
 }
 
-
 // -----------------------------------------------------------------------------
 // Full-opening helpers
 // -----------------------------------------------------------------------------
@@ -816,20 +799,12 @@ where
     for _ in 0..pp.qa.num_column_opening() {
         let column = squeeze_challenge_idx(transcript, codeword_len);
 
-        transcript.write_field_elements(
-            comm.rows.iter().map(|row| &row[column]),
-        )?;
+        transcript.write_field_elements(comm.rows.iter().map(|row| &row[column]))?;
 
         let mut offset = 0;
-        for (idx, width) in (1..=depth)
-            .rev()
-            .map(|depth| 1usize << depth)
-            .enumerate()
-        {
+        for (idx, width) in (1..=depth).rev().map(|depth| 1usize << depth).enumerate() {
             let neighbor_idx = (column >> idx) ^ 1;
-            transcript.write_commitment(
-                &comm.intermediate_hashes[offset + neighbor_idx],
-            )?;
+            transcript.write_commitment(&comm.intermediate_hashes[offset + neighbor_idx])?;
             offset += width;
         }
     }
@@ -856,8 +831,7 @@ where
     debug_assert!(codeword_len.is_power_of_two());
 
     let (row_weights, column_weights) = point_to_tensor(vp.num_rows, point);
-    let mut combined_rows =
-        Vec::with_capacity(vp.qa.num_proximity_testing() + 1);
+    let mut combined_rows = Vec::with_capacity(vp.qa.num_proximity_testing() + 1);
 
     // Random proximity-folded rows.
     if vp.num_rows > 1 {
@@ -1057,7 +1031,10 @@ where
         Self::Polynomial: 'a,
     {
         let polys_vec: Vec<&Self::Polynomial> = polys.into_iter().collect();
-        polys_vec.par_iter().map(|poly| Self::commit(pp, poly)).collect()
+        polys_vec
+            .par_iter()
+            .map(|poly| Self::commit(pp, poly))
+            .collect()
     }
 
     fn open(
@@ -1068,14 +1045,7 @@ where
         eval: &F,
         transcript: &mut impl TranscriptWrite<Self::CommitmentChunk, F>,
     ) -> Result<(), Error> {
-        qapcs_open_full::<F, H>(
-            pp,
-            poly,
-            comm,
-            point,
-            eval,
-            transcript,
-        )
+        qapcs_open_full::<F, H>(pp, poly, comm, point, eval, transcript)
     }
 
     fn batch_open<'a>(
@@ -1125,13 +1095,7 @@ where
         eval: &F,
         transcript: &mut impl TranscriptRead<Self::CommitmentChunk, F>,
     ) -> Result<(), Error> {
-        qapcs_verify_full::<F, H>(
-            vp,
-            comm,
-            point,
-            eval,
-            transcript,
-        )
+        qapcs_verify_full::<F, H>(vp, comm, point, eval, transcript)
     }
 
     fn batch_verify<'a>(
@@ -1162,10 +1126,7 @@ where
 // Helpers
 // -----------------------------------------------------------------------------
 
-fn point_to_tensor<F: PrimeField>(
-    num_rows: usize,
-    point: &[F],
-) -> (Vec<F>, Vec<F>) {
+fn point_to_tensor<F: PrimeField>(num_rows: usize, point: &[F]) -> (Vec<F>, Vec<F>) {
     assert!(num_rows.is_power_of_two());
 
     let log_rows = num_rows.ilog2() as usize;
@@ -1180,13 +1141,10 @@ fn point_to_tensor<F: PrimeField>(
     //
     // MLE coordinates are little-endian, so the first coordinates index
     // columns and the last log_rows coordinates index rows.
-    let (column_point, row_point) =
-        point.split_at(point.len() - log_rows);
+    let (column_point, row_point) = point.split_at(point.len() - log_rows);
 
-    let row_weights =
-        MultilinearPolynomial::eq_xy(row_point).into_evals();
-    let column_weights =
-        MultilinearPolynomial::eq_xy(column_point).into_evals();
+    let row_weights = MultilinearPolynomial::eq_xy(row_point).into_evals();
+    let column_weights = MultilinearPolynomial::eq_xy(column_point).into_evals();
 
     (row_weights, column_weights)
 }
@@ -1273,42 +1231,26 @@ mod test {
             Fr::from(11u64),
         ];
 
-        let direct =
-            MultilinearPolynomial::new(evals.clone()).evaluate(&point);
-        let (row_weights, column_weights) =
-            point_to_tensor(num_rows, &point);
+        let direct = MultilinearPolynomial::new(evals.clone()).evaluate(&point);
+        let (row_weights, column_weights) = point_to_tensor(num_rows, &point);
 
         let mut combined_row = vec![Fr::ZERO; row_len];
-        combine_message_rows(
-            &evals,
-            num_rows,
-            row_len,
-            &row_weights,
-            &mut combined_row,
-        )
-        .unwrap();
+        combine_message_rows(&evals, num_rows, row_len, &row_weights, &mut combined_row).unwrap();
 
-        assert_eq!(
-            direct,
-            inner_product(&combined_row, &column_weights),
-        );
+        assert_eq!(direct, inner_product(&combined_row, &column_weights),);
     }
 
     #[test]
     fn full_open_rejects_wrong_claimed_value() {
-        type TestTranscript =
-            Blake2sTranscript<Cursor<Vec<u8>>>;
+        type TestTranscript = Blake2sTranscript<Cursor<Vec<u8>>>;
 
         let poly_size = 1usize << 8;
         let mut rng = ChaCha8Rng::from_seed([42u8; 32]);
         let param = Pcs::setup(poly_size, 1, &mut rng).unwrap();
         let (pp, _) = Pcs::trim(&param, poly_size, 1).unwrap();
 
-        let poly = MultilinearPolynomial::new(
-            (0..poly_size)
-                .map(|_| Fr::random(&mut rng))
-                .collect(),
-        );
+        let poly =
+            MultilinearPolynomial::new((0..poly_size).map(|_| Fr::random(&mut rng)).collect());
         let comm = Pcs::commit(&pp, &poly).unwrap();
         let point = (0..pp.num_vars())
             .map(|_| Fr::random(&mut rng))
@@ -1317,17 +1259,9 @@ mod test {
         let wrong = actual + Fr::ONE;
 
         let mut transcript = TestTranscript::new(());
-        let result = Pcs::open(
-            &pp,
-            &poly,
-            &comm,
-            &point,
-            &wrong,
-            &mut transcript,
-        );
+        let result = Pcs::open(&pp, &poly, &comm, &point, &wrong, &mut transcript);
         assert!(result.is_err());
     }
-
 
     #[test]
     fn shape_uses_rate_half() {

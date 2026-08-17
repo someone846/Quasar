@@ -17,8 +17,8 @@ use rayon::{current_num_threads, prelude::*, ThreadPoolBuilder};
 
 use std::{
     env::args,
-    hint::black_box,
     fs::{create_dir_all, File, OpenOptions},
+    hint::black_box,
     io::{Cursor, Write},
     path::Path,
     time::{Duration, Instant},
@@ -98,10 +98,7 @@ struct SecurityChoice {
 
 impl SecurityChoice {
     fn new(total_k: usize, log_rows: usize, cfg: &BenchConfig) -> Self {
-        assert!(
-            total_k >= log_rows,
-            "total_k must be at least log_rows"
-        );
+        assert!(total_k >= log_rows, "total_k must be at least log_rows");
 
         let row_k = total_k - log_rows;
         let delta = qabase_distance_lower_bound(
@@ -374,8 +371,8 @@ fn print_help_and_exit() -> ! {
         "Quasar full PCS benchmark with endpoint-only two-layer GKR\n\n\
          Smoke test:\n\
            cargo bench -p benchmark --bench quasar_bench -- --smoke --threads 8\n\n\
-         Rate-1/2 experiment:\n\
-           cargo bench -p benchmark --bench quasar_bench -- \\\n             --total-k 20..=30 --log-rows 6 --inverse-rate 2 \\\n             --auto-queries --security 100 --distance-failure 100 \\\n             --samples 5 --threads 32\n\n\
+         Rate-1/2 experiment (103-bit security):\n\
+           cargo bench -p benchmark --bench quasar_bench -- \\\n             --total-k 20..=29 --log-rows 8 --inverse-rate 2 \\\n             --auto-queries --security 103 --distance-failure 103 \\\n             --samples 5 --threads 32\n\n\
          Rate-1/4 experiment:\n\
            cargo bench -p benchmark --bench quasar_bench -- \\\n             --total-k 20..=30 --log-rows 6 --inverse-rate 4 \\\n             --auto-queries --security 100 --distance-failure 100 \\\n             --samples 5 --threads 32\n\n\
          Options:\n\
@@ -402,8 +399,7 @@ fn print_help_and_exit() -> ! {
 fn qabase_gp(delta: f64, field_bits: usize) -> f64 {
     assert!(delta > 0.0 && delta < 1.0);
     let bits = field_bits as f64;
-    1.0 - delta
-        + (delta * delta.log2() + (1.0 - delta) * (1.0 - delta).log2()) / bits
+    1.0 - delta + (delta * delta.log2() + (1.0 - delta) * (1.0 - delta).log2()) / bits
 }
 
 fn log2_add(a: f64, b: f64) -> f64 {
@@ -440,14 +436,12 @@ fn qabase_distance_failure_log2(
 
     let log_term1_a = ((c * (c - 1)) as f64 / 2.0).log2() + log_n - 2.0 * log_p;
     let threshold1 = (((c - 1) as f64) / ((c as f64) * delta)).ceil();
-    let log_term1_b =
-        -log_p * threshold1 * (c as f64) * eps - denom_log - log_p_minus_one;
+    let log_term1_b = -log_p * threshold1 * (c as f64) * eps - denom_log - log_p_minus_one;
     let log_bound1 = log2_add(log_term1_a, log_term1_b);
 
     let log_term2_a = (c as f64).log2() + log_n - log_p;
     let threshold2 = (1.0 / delta).ceil();
-    let log_term2_b =
-        -log_p * threshold2 * (c as f64) * eps - denom_log - log_p_minus_one;
+    let log_term2_b = -log_p * threshold2 * (c as f64) * eps - denom_log - log_p_minus_one;
     let log_bound2 = log2_add(log_term2_a, log_term2_b);
 
     log_bound1.min(log_bound2)
@@ -487,11 +481,7 @@ fn qabase_queries_from_distance(delta: f64, security_bits: usize) -> usize {
 // Benchmark helpers
 // -----------------------------------------------------------------------------
 
-fn make_random_matrix(
-    row_k: usize,
-    num_rows: usize,
-    rng: &mut ChaCha8Rng,
-) -> Vec<Vec<BenchField>> {
+fn make_random_matrix(row_k: usize, num_rows: usize, rng: &mut ChaCha8Rng) -> Vec<Vec<BenchField>> {
     let row_size = 1usize << row_k;
     (0..num_rows)
         .map(|_| {
@@ -503,9 +493,7 @@ fn make_random_matrix(
 }
 
 fn random_point(len: usize, rng: &mut ChaCha8Rng) -> Vec<BenchField> {
-    (0..len)
-        .map(|_| BenchField::random(&mut *rng))
-        .collect()
+    (0..len).map(|_| BenchField::random(&mut *rng)).collect()
 }
 
 fn fold_rows_for_evaluation(
@@ -596,13 +584,9 @@ fn bench_one(total_k: usize, log_rows: usize, cfg: &BenchConfig) -> BenchResult 
     // separately.
     let eval_prepare_start = Instant::now();
     let full_point = random_point(choice.total_k, &mut rng);
-    let (z_left, z_right) = qabase_split_evaluation_point::<BenchField>(
-        &full_point,
-        choice.num_rows,
-        choice.row_k,
-    );
-    let row_weights =
-        qabase_row_weights_from_z_left::<BenchField>(choice.num_rows, &z_left);
+    let (z_left, z_right) =
+        qabase_split_evaluation_point::<BenchField>(&full_point, choice.num_rows, choice.row_k);
+    let row_weights = qabase_row_weights_from_z_left::<BenchField>(choice.num_rows, &z_left);
     let eval_msg = fold_rows_for_evaluation(&matrix, &row_weights);
     let claimed_value = eval_mle_from_evals::<BenchField>(&eval_msg, &z_right);
     let eval_prepare_time = eval_prepare_start.elapsed();
@@ -626,11 +610,7 @@ fn bench_one(total_k: usize, log_rows: usize, cfg: &BenchConfig) -> BenchResult 
         let mut commit_transcript = TestTranscript::new(());
 
         let commit_start = Instant::now();
-        let comm = commit_and_write::<BenchField, Blake2s>(
-            &pp,
-            &matrix,
-            &mut commit_transcript,
-        );
+        let comm = commit_and_write::<BenchField, Blake2s>(&pp, &matrix, &mut commit_transcript);
         let elapsed = commit_start.elapsed();
 
         // Ensure the compiler cannot discard the constructed commitment.
@@ -656,11 +636,7 @@ fn bench_one(total_k: usize, log_rows: usize, cfg: &BenchConfig) -> BenchResult 
     // root, which is equivalent to the transcript effect of commit_and_write.
     let mut commitment_build_transcript = TestTranscript::new(());
     let comm: QABaseCommitment<BenchField, Blake2s> =
-        commit_and_write::<BenchField, Blake2s>(
-            &pp,
-            &matrix,
-            &mut commitment_build_transcript,
-        );
+        commit_and_write::<BenchField, Blake2s>(&pp, &matrix, &mut commitment_build_transcript);
     drop(commitment_build_transcript);
 
     let committed_root: &Output<Blake2s> = comm.as_ref();
@@ -702,26 +678,23 @@ fn bench_one(total_k: usize, log_rows: usize, cfg: &BenchConfig) -> BenchResult 
         let proof = prover_transcript.into_proof();
         last_proof_bytes = proof.len();
 
-        let mut verifier_transcript =
-            TestTranscript::from_proof((), proof.as_slice());
+        let mut verifier_transcript = TestTranscript::from_proof((), proof.as_slice());
 
         let verify_start = Instant::now();
-        let (ok, verifier_output) =
-            verify_qabase_open_full_two_layer_gkr::<BenchField, Blake2s>(
-                &vp,
-                &comm,
-                z_left.clone(),
-                z_right.clone(),
-                claimed_value,
-                &mut verifier_transcript,
-            )
-            .expect("Quasar two-layer-GKR verifier errored");
+        let (ok, verifier_output) = verify_qabase_open_full_two_layer_gkr::<BenchField, Blake2s>(
+            &vp,
+            &comm,
+            z_left.clone(),
+            z_right.clone(),
+            claimed_value,
+            &mut verifier_transcript,
+        )
+        .expect("Quasar two-layer-GKR verifier errored");
         verify_times.push(verify_start.elapsed());
 
         assert!(ok, "Quasar verifier rejected a valid proof");
         assert_eq!(
-            prover_output.query_indices,
-            verifier_output.query_indices,
+            prover_output.query_indices, verifier_output.query_indices,
             "prover/verifier query positions differ"
         );
 

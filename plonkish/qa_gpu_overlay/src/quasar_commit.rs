@@ -4,8 +4,8 @@ use crate::gpu::{
 };
 use plonkish_backend::{
     pcs::multilinear::quasar::{
-        commit_tree_and_write, merkelize_from_leaves, CommitmentChunk,
-        QABaseCommitment, QABaseProverParams,
+        commit_tree_and_write, merkelize_from_leaves, CommitmentChunk, QABaseCommitment,
+        QABaseProverParams,
     },
     util::{
         hash::{Blake2s, Output},
@@ -76,8 +76,30 @@ impl CudaQuasarCommitter {
             ));
         }
 
-        let encoder = GpuQaEncoder::new(&pp.qa_params, gpu_batch_rows)?;
         let messages = word.iter().flatten().copied().collect::<Vec<_>>();
+        Self::new_flat(pp, messages, gpu_batch_rows)
+    }
+
+    /// Builds a committer by taking ownership of an existing row-major
+    /// evaluation table. This avoids another full witness copy in large
+    /// end-to-end applications such as matrix multiplication.
+    pub fn new_flat(
+        pp: &QABaseProverParams<Mersenne127, Blake2s>,
+        messages: Vec<Mersenne127>,
+        gpu_batch_rows: usize,
+    ) -> Result<Self, String> {
+        let row_len = 1usize << pp.num_vars;
+        let expected = pp
+            .num_rows
+            .checked_mul(row_len)
+            .ok_or_else(|| "Quasar input size overflows usize".to_owned())?;
+        if messages.len() != expected {
+            return Err(format!(
+                "Quasar input has {} elements, expected {expected}",
+                messages.len()
+            ));
+        }
+        let encoder = GpuQaEncoder::new(&pp.qa_params, gpu_batch_rows)?;
         let input = encoder.register_input(messages)?;
         let output = encoder.allocate_device_output(pp.num_rows)?;
         Ok(Self {
@@ -85,6 +107,16 @@ impl CudaQuasarCommitter {
             input,
             output: Some(output),
         })
+    }
+
+    /// The pinned message table is also the opening prover's row source.
+    pub fn word(&self) -> &GpuQaInput {
+        &self.input
+    }
+
+    /// Flat row-major evaluations used by the application reduction.
+    pub fn input_values(&self) -> &[Mersenne127] {
+        self.input.as_slice()
     }
 
     pub fn device_name(&self) -> Result<String, String> {
@@ -150,8 +182,7 @@ impl CudaQuasarCommitter {
         timing.cpu_upper_merkle = upper_start.elapsed();
         println!(
             "degree {}, GPU leaves + CPU upper Merkle {:?}",
-            pp.num_vars,
-            timing.cpu_upper_merkle,
+            pp.num_vars, timing.cpu_upper_merkle,
         );
         let commitment = commit_tree_and_write(pp, output, tree, transcript);
         Ok((commitment, timing))

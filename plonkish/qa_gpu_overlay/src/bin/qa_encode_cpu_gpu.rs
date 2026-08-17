@@ -1,12 +1,6 @@
-use plonkish_backend::{
-    pcs::multilinear::quasar::QAParams,
-    util::new_fields::Mersenne127,
-};
+use plonkish_backend::{pcs::multilinear::quasar::QAParams, util::new_fields::Mersenne127};
 use qa_gpu_overlay::{
-    cpu::{
-        benchmark_field_operations, qa_encode_cpu_baseline_rows,
-        qa_encode_cpu_profiled_rows,
-    },
+    cpu::{benchmark_field_operations, qa_encode_cpu_baseline_rows, qa_encode_cpu_profiled_rows},
     gpu::GpuQaEncoder,
 };
 use rand_chacha::{rand_core::SeedableRng, ChaCha8Rng};
@@ -159,8 +153,7 @@ fn main() -> ExitCode {
 
     let row_len = 1usize << config.log_row_len;
     let mut rng = ChaCha8Rng::seed_from_u64(config.seed);
-    let params =
-        QAParams::<Mersenne127>::new_random(row_len, config.inverse_rate, &mut rng);
+    let params = QAParams::<Mersenne127>::new_random(row_len, config.inverse_rate, &mut rng);
     let input_initialize_start = Instant::now();
     let messages = (0..config.rows * row_len)
         .map(|_| <Mersenne127 as plonkish_backend::util::arithmetic::Field>::random(&mut rng))
@@ -203,9 +196,8 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let input_gib = messages.len() as f64
-        * std::mem::size_of::<Mersenne127>() as f64
-        / (1u64 << 30) as f64;
+    let input_gib =
+        messages.len() as f64 * std::mem::size_of::<Mersenne127>() as f64 / (1u64 << 30) as f64;
     println!("reusable pinned host input: {input_gib:.3} GiB");
     println!(
         "  allocation + random initialize {:10.3} ms",
@@ -223,18 +215,26 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let output_gib = gpu_output.len() as f64
-        * std::mem::size_of::<Mersenne127>() as f64
-        / (1u64 << 30) as f64;
+    let output_gib =
+        gpu_output.len() as f64 * std::mem::size_of::<Mersenne127>() as f64 / (1u64 << 30) as f64;
     let setup = gpu_output.setup_timing();
     println!("reusable pinned host output: {output_gib:.3} GiB");
-    println!("  virtual allocation             {:10.3} ms", ms(setup.allocation));
+    println!(
+        "  virtual allocation             {:10.3} ms",
+        ms(setup.allocation)
+    );
     println!(
         "  parallel pre-fault + initialize{:10.3} ms",
         ms(setup.prefault_and_initialize)
     );
-    println!("  cudaHostRegister               {:10.3} ms", ms(setup.pin_registration));
-    println!("  one-time output setup total    {:10.3} ms", ms(setup.total));
+    println!(
+        "  cudaHostRegister               {:10.3} ms",
+        ms(setup.pin_registration)
+    );
+    println!(
+        "  one-time output setup total    {:10.3} ms",
+        ms(setup.total)
+    );
 
     let warm_up = match gpu.encode_rows_into(&messages, &mut gpu_output) {
         Ok(timing) => timing,
@@ -306,18 +306,57 @@ fn main() -> ExitCode {
             ms(baseline_time)
         );
         println!("  profiled CPU total             {:10.3} ms", ms(cpu.total));
-        println!("    first WHT                    {:10.3} ms  {:6.2}%", ms(cpu.first_wht), percent(cpu.first_wht, cpu.measured_compute()));
-        println!("    scaling multiplications      {:10.3} ms  {:6.2}%", ms(cpu.scaling_multiplications), percent(cpu.scaling_multiplications, cpu.measured_compute()));
-        println!("    second WHT                   {:10.3} ms  {:6.2}%", ms(cpu.second_wht), percent(cpu.second_wht, cpu.measured_compute()));
-        println!("    allocation + systematic copy {:10.3} ms", ms(cpu.allocation + cpu.systematic_copy));
-        println!("  GPU CUDA timeline              {:10.3} ms", gpu_timing.total_cuda_ms);
-        println!("    H2D                          {:10.3} ms", gpu_timing.host_to_device_ms);
-        println!("    device input copy            {:10.3} ms", gpu_timing.device_input_copy_ms);
-        println!("    first WHT                    {:10.3} ms", gpu_timing.first_wht_ms);
-        println!("    scaling multiplications      {:10.3} ms", gpu_timing.scaling_ms);
-        println!("    second WHT                   {:10.3} ms", gpu_timing.second_wht_ms);
-        println!("    assembly                     {:10.3} ms", gpu_timing.assemble_ms);
-        println!("    D2H                          {:10.3} ms", gpu_timing.device_to_host_ms);
+        println!(
+            "    first WHT                    {:10.3} ms  {:6.2}%",
+            ms(cpu.first_wht),
+            percent(cpu.first_wht, cpu.measured_compute())
+        );
+        println!(
+            "    scaling multiplications      {:10.3} ms  {:6.2}%",
+            ms(cpu.scaling_multiplications),
+            percent(cpu.scaling_multiplications, cpu.measured_compute())
+        );
+        println!(
+            "    second WHT                   {:10.3} ms  {:6.2}%",
+            ms(cpu.second_wht),
+            percent(cpu.second_wht, cpu.measured_compute())
+        );
+        println!(
+            "    allocation + systematic copy {:10.3} ms",
+            ms(cpu.allocation + cpu.systematic_copy)
+        );
+        println!(
+            "  GPU CUDA timeline              {:10.3} ms",
+            gpu_timing.total_cuda_ms
+        );
+        println!(
+            "    H2D                          {:10.3} ms",
+            gpu_timing.host_to_device_ms
+        );
+        println!(
+            "    device input copy            {:10.3} ms",
+            gpu_timing.device_input_copy_ms
+        );
+        println!(
+            "    first WHT                    {:10.3} ms",
+            gpu_timing.first_wht_ms
+        );
+        println!(
+            "    scaling multiplications      {:10.3} ms",
+            gpu_timing.scaling_ms
+        );
+        println!(
+            "    second WHT                   {:10.3} ms",
+            gpu_timing.second_wht_ms
+        );
+        println!(
+            "    assembly                     {:10.3} ms",
+            gpu_timing.assemble_ms
+        );
+        println!(
+            "    D2H                          {:10.3} ms",
+            gpu_timing.device_to_host_ms
+        );
         println!(
             "  GPU steady-state wall          {:10.3} ms  (reused pinned input/output)",
             ms(gpu_timing.total_wall)
@@ -334,9 +373,18 @@ fn main() -> ExitCode {
     }
 
     let h2d_min = h2d_samples.iter().copied().fold(f64::INFINITY, f64::min);
-    let h2d_max = h2d_samples.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-    let wall_min = gpu_wall_samples.iter().copied().fold(f64::INFINITY, f64::min);
-    let wall_max = gpu_wall_samples.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let h2d_max = h2d_samples
+        .iter()
+        .copied()
+        .fold(f64::NEG_INFINITY, f64::max);
+    let wall_min = gpu_wall_samples
+        .iter()
+        .copied()
+        .fold(f64::INFINITY, f64::min);
+    let wall_max = gpu_wall_samples
+        .iter()
+        .copied()
+        .fold(f64::NEG_INFINITY, f64::max);
     let mean_baseline = mean(&baseline_samples);
     let mean_wall = mean(&gpu_wall_samples);
     println!("\nsteady-state summary (warm-up excluded):");

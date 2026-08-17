@@ -98,10 +98,7 @@ struct SecurityChoice {
 
 impl SecurityChoice {
     fn new(total_k: usize, log_rows: usize, cfg: &BenchConfig) -> Self {
-        assert!(
-            total_k >= log_rows,
-            "total_k must be at least log_rows"
-        );
+        assert!(total_k >= log_rows, "total_k must be at least log_rows");
 
         let row_k = total_k - log_rows;
 
@@ -361,7 +358,10 @@ fn parse_args() -> BenchConfig {
     );
     assert!(cfg.field_bits >= 32, "field_bits is unexpectedly small");
     assert!(cfg.security_bits >= 1, "security must be positive");
-    assert!(cfg.distance_failure_bits >= 1, "distance-failure must be positive");
+    assert!(
+        cfg.distance_failure_bits >= 1,
+        "distance-failure must be positive"
+    );
     assert!(cfg.threads >= 1, "threads must be positive");
 
     cfg
@@ -414,8 +414,7 @@ fn qabase_gp(delta: f64, field_bits: usize) -> f64 {
 
     let bits = field_bits as f64;
 
-    1.0 - delta
-        + (delta * delta.log2() + (1.0 - delta) * (1.0 - delta).log2()) / bits
+    1.0 - delta + (delta * delta.log2() + (1.0 - delta) * (1.0 - delta).log2()) / bits
 }
 
 fn log2_add(a: f64, b: f64) -> f64 {
@@ -464,8 +463,7 @@ fn qabase_distance_failure_log2(
     //       / ((1 - p^{-c eps})(p - 1)).
     let log_term1_a = ((c * (c - 1)) as f64 / 2.0).log2() + log_n - 2.0 * log_p;
     let threshold1 = (((c - 1) as f64) / ((c as f64) * delta)).ceil();
-    let log_term1_b =
-        -log_p * threshold1 * (c as f64) * eps - denom_log - log_p_minus_one;
+    let log_term1_b = -log_p * threshold1 * (c as f64) * eps - denom_log - log_p_minus_one;
     let log_bound1 = log2_add(log_term1_a, log_term1_b);
 
     // New Corollary 3.19 bound, second branch:
@@ -475,8 +473,7 @@ fn qabase_distance_failure_log2(
     //       / ((1 - p^{-c eps})(p - 1)).
     let log_term2_a = (c as f64).log2() + log_n - log_p;
     let threshold2 = (1.0 / delta).ceil();
-    let log_term2_b =
-        -log_p * threshold2 * (c as f64) * eps - denom_log - log_p_minus_one;
+    let log_term2_b = -log_p * threshold2 * (c as f64) * eps - denom_log - log_p_minus_one;
     let log_bound2 = log2_add(log_term2_a, log_term2_b);
 
     log_bound1.min(log_bound2)
@@ -521,11 +518,7 @@ fn qabase_queries_from_distance(delta: f64, security_bits: usize) -> usize {
 // Benchmark logic
 // -----------------------------------------------------------------------------
 
-fn make_random_matrix(
-    row_k: usize,
-    num_rows: usize,
-    rng: &mut ChaCha8Rng,
-) -> Vec<Vec<BenchField>> {
+fn make_random_matrix(row_k: usize, num_rows: usize, rng: &mut ChaCha8Rng) -> Vec<Vec<BenchField>> {
     let row_size = 1usize << row_k;
 
     (0..num_rows)
@@ -599,14 +592,11 @@ fn bench_one_total_k(total_k: usize, log_rows: usize, cfg: &BenchConfig) -> Benc
         commit_times.push(start.elapsed());
 
         let start = Instant::now();
-        let _prover_output =
-            prove_qabase_open_scaffold_global_batch_batched_wht::<BenchField, Blake2s>(
-                &pp,
-                &matrix,
-                &comm,
-                &mut prover_transcript,
-            )
-            .expect("QABase prover failed");
+        let _prover_output = prove_qabase_open_scaffold_global_batch_batched_wht::<
+            BenchField,
+            Blake2s,
+        >(&pp, &matrix, &comm, &mut prover_transcript)
+        .expect("QABase prover failed");
         prove_times.push(start.elapsed());
 
         let proof = prover_transcript.into_proof();
@@ -615,13 +605,11 @@ fn bench_one_total_k(total_k: usize, log_rows: usize, cfg: &BenchConfig) -> Benc
         let mut verifier_transcript = TestTranscript::from_proof((), proof.as_slice());
 
         let start = Instant::now();
-        let (ok, _verifier_output) =
-            verify_qabase_open_scaffold_global_batch_batched_wht::<BenchField, Blake2s>(
-                &vp,
-                &comm,
-                &mut verifier_transcript,
-            )
-            .expect("QABase verifier errored");
+        let (ok, _verifier_output) = verify_qabase_open_scaffold_global_batch_batched_wht::<
+            BenchField,
+            Blake2s,
+        >(&vp, &comm, &mut verifier_transcript)
+        .expect("QABase verifier errored");
         verify_times.push(start.elapsed());
 
         assert!(ok, "QABase verifier rejected");
@@ -689,12 +677,7 @@ fn output_path(cfg: &BenchConfig) -> String {
 
     format!(
         "{OUTPUT_DIR}/qabase_mersenne127_full_rho{}_{}_sec{}_df{}_queries{}_th{}.csv",
-        cfg.inverse_rate,
-        row_tag,
-        cfg.security_bits,
-        cfg.distance_failure_bits,
-        q_tag,
-        cfg.threads,
+        cfg.inverse_rate, row_tag, cfg.security_bits, cfg.distance_failure_bits, q_tag, cfg.threads,
     )
 }
 

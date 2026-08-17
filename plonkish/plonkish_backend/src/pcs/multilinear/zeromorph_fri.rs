@@ -1,9 +1,9 @@
-use crate::util::hash::Output;
-use crate::pcs::univariate::{FriCommitment,open_helper,verify_helper};
+use crate::pcs::univariate::{open_helper, verify_helper, FriCommitment};
 use crate::piop::sum_check::{
     classic::{ClassicSumCheck, CoefficientsProver},
     eq_xy_eval, SumCheck as _, VirtualPolynomial,
 };
+use crate::util::hash::Output;
 use rayon::prelude::{
     IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
     ParallelSlice, ParallelSliceMut,
@@ -111,7 +111,6 @@ where
         eval: &F,
         transcript: &mut impl TranscriptWrite<Self::CommitmentChunk, F>,
     ) -> Result<(), Error> {
-
         let num_vars = poly.num_vars();
 
         if cfg!(feature = "sanity-check") {
@@ -160,7 +159,6 @@ where
         //TODO: write queries to check later
 
         Fri::<F, H>::open(&pp.commit_pp, &f, &comm.unwrap(), &x, &F::ZERO, transcript)
-
     }
 
     fn batch_open<'a>(
@@ -269,16 +267,16 @@ where
 
         //write batch queries
 
-
         let poly = g_prime;
-	
+
         let num_vars = poly.num_vars();
 
         if cfg!(feature = "sanity-check") {
             assert_eq!(poly.evaluate(&point[..]), eval);
         }
 
-        let (quotients, remainder) = quotients(&poly, &point[..], |_, q| UnivariatePolynomial::new(q));
+        let (quotients, remainder) =
+            quotients(&poly, &point[..], |_, q| UnivariatePolynomial::new(q));
         let now = Instant::now();
         let comms_fri = Fri::<F, H>::batch_commit_and_write(&pp.commit_pp, &quotients, transcript)?;
         //	println!("batch {:?} batch size {:?}", now.elapsed(),quotients.len());
@@ -317,10 +315,9 @@ where
         assert_eq!(f.evaluate(&x), F::ZERO);
         let comm = Fri::<F, H>::commit_and_write(&pp.commit_pp, &f, transcript);
 
-        let (res,q) =
-	    open_helper(&pp.commit_pp, &f, &comm.unwrap(), &x, &F::ZERO, transcript);
+        let (res, q) = open_helper(&pp.commit_pp, &f, &comm.unwrap(), &x, &F::ZERO, transcript);
 
-	let (queried_els, queries_usize) = q;
+        let (queried_els, queries_usize) = q;
 
         let mut individual_queries: Vec<Vec<(F, F)>> = Vec::with_capacity(queries_usize.len());
 
@@ -353,10 +350,9 @@ where
             .for_each(|(h1, h2)| {
                 transcript.write_commitment(h1);
                 transcript.write_commitment(h2);
-            });	
+            });
 
-	
-	res
+        res
     }
 
     fn read_commitments(
@@ -394,8 +390,6 @@ where
         //check consistency of all commitments vis-a-vis batch commitments
 
         Fri::verify(&vp.vp, &comm[0], &x, &F::ZERO, transcript)
-
-	
     }
 
     fn batch_verify<'a>(
@@ -423,11 +417,9 @@ where
             .map(|point| eq_xy_eval(&verify_point, point))
             .collect_vec();
 
-
-
-	let comm = Self::Commitment::default();
-	let point = verify_point;
-	let eval = F::ZERO;
+        let comm = Self::Commitment::default();
+        let point = verify_point;
+        let eval = F::ZERO;
         let num_vars = point.len();
 
         let q_comms = Fri::<F, H>::read_commitments(&vp.vp, num_vars, transcript)?;
@@ -445,9 +437,7 @@ where
         //      let bases = chain![[q_hat_comm, comm.0, vp.g1()], q_comms].collect_vec();
         let comm = Fri::<F, H>::read_commitments(&vp.vp, 1, transcript)?;
 
-	let (v,queries_usize) = verify_helper(&vp.vp, &comm[0], &x, &F::ZERO, transcript);
-	
- 
+        let (v, queries_usize) = verify_helper(&vp.vp, &comm[0], &x, &F::ZERO, transcript);
 
         let mut ind_queries = Vec::with_capacity(vp.vp.num_verifier_queries);
         let mut count = 0;
@@ -478,16 +468,15 @@ where
             batch_paths.push(comms_merkle_paths);
         }
 
-
         for vq in 0..vp.vp.num_verifier_queries {
             for cq in 0..ind_queries[vq].len() {
                 let tree = &comms[evals[cq].poly].codeword_tree;
-/*
-		assert_eq!(
-                    tree[tree.len() - 1][0],
-                    batch_paths[vq][cq].pop().unwrap().pop().unwrap()
-                );
-*/
+                /*
+                        assert_eq!(
+                                    tree[tree.len() - 1][0],
+                                    batch_paths[vq][cq].pop().unwrap().pop().unwrap()
+                                );
+                */
                 authenticate_merkle_path::<H, F>(
                     &batch_paths[vq][cq],
                     (ind_queries[vq][cq][0], ind_queries[vq][cq][1]),
@@ -496,7 +485,7 @@ where
 
                 count += 1;
             }
-        }	
+        }
 
         Ok(())
     }

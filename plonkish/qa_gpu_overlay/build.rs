@@ -4,7 +4,10 @@ fn run(command: &mut Command, description: &str) {
     let status = command
         .status()
         .unwrap_or_else(|error| panic!("failed to run {description}: {error}"));
-    assert!(status.success(), "{description} failed with status {status}");
+    assert!(
+        status.success(),
+        "{description} failed with status {status}"
+    );
 }
 
 fn main() {
@@ -37,17 +40,16 @@ fn main() {
     );
 
     run(
-        Command::new("ar")
-            .arg("crus")
-            .arg(&library)
-            .arg(&object),
+        Command::new("ar").arg("crus").arg(&library).arg(&object),
         "ar",
     );
 
     println!("cargo:rustc-link-search=native={}", out_dir.display());
-    println!("cargo:rustc-link-search=native={}", cuda_root.join("lib64").display());
+    println!(
+        "cargo:rustc-link-search=native={}",
+        cuda_root.join("lib64").display()
+    );
     println!("cargo:rustc-link-lib=static=qa_mersenne127_cuda");
     println!("cargo:rustc-link-lib=dylib=cudart");
     println!("cargo:rustc-link-lib=dylib=stdc++");
 }
-

@@ -60,7 +60,6 @@ impl<F> MultilinearPolynomial<F> {
     pub fn iter(&self) -> impl Iterator<Item = &F> {
         self.evals.iter()
     }
-    
 }
 
 impl<F: Field> Polynomial<F> for MultilinearPolynomial<F> {
@@ -130,21 +129,26 @@ impl<F: Field> MultilinearPolynomial<F> {
         )
     }
 
-    pub fn split(&self, log_num_chunks:usize) -> Vec<Self>{
+    pub fn split(&self, log_num_chunks: usize) -> Vec<Self> {
         let row_len = 1 << (self.num_vars - log_num_chunks);
-        (row_len..(1 << self.num_vars) + 1).step_by(row_len).map(|row_end|{
-            let new_evals =
-            self.evals
-            .iter()
-            .enumerate()
-            .filter_map(|(i,x)| 
-                if i < row_end && i >= (row_end - row_len) { 
-                    return Some(*x); 
-                } 
-                else { return None;})
-            .collect::<Vec<_>>();
-            Self::new(new_evals)
-        }).collect::<Vec<_>>()
+        (row_len..(1 << self.num_vars) + 1)
+            .step_by(row_len)
+            .map(|row_end| {
+                let new_evals = self
+                    .evals
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, x)| {
+                        if i < row_end && i >= (row_end - row_len) {
+                            return Some(*x);
+                        } else {
+                            return None;
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                Self::new(new_evals)
+            })
+            .collect::<Vec<_>>()
     }
     pub fn evaluate(&self, x: &[F]) -> F {
         assert_eq!(x.len(), self.num_vars);

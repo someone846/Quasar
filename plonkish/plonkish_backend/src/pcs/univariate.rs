@@ -1,8 +1,10 @@
 #![allow(warnings, unused)]
-mod kzg;
 mod fri;
+mod kzg;
+pub use fri::{
+    open_helper, verify_helper, Fri, FriCommitment, FriParams, FriProverParams, FriVerifierParams,
+};
 pub use kzg::{
     UnivariateKzg, UnivariateKzgCommitment, UnivariateKzgParam, UnivariateKzgProverParam,
     UnivariateKzgVerifierParam,
 };
-pub use fri::{Fri, FriCommitment, FriParams, FriProverParams, FriVerifierParams,open_helper, verify_helper}; 

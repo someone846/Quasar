@@ -17,17 +17,19 @@ use itertools::Itertools;
 use plonkish_backend::{
     backend::{self, PlonkishBackend, PlonkishCircuit},
     frontend::halo2::{circuit::VanillaPlonk, CircuitExt, Halo2Circuit},
-    halo2_curves::{bn256::{Bn256, Fr}, secp256k1::Fp},
-    pcs::{multilinear::ZeromorphFri,
-	  univariate::Fri},
+    halo2_curves::{
+        bn256::{Bn256, Fr},
+        secp256k1::Fp,
+    },
+    pcs::{multilinear::ZeromorphFri, univariate::Fri},
     util::{
-        end_timer, start_timer,
+        code::BrakedownSpec6,
+        end_timer,
+        goldilocksMont::GoldilocksMont,
+        hash::{Blake2s, Blake2s256},
+        start_timer,
         test::std_rng,
-        transcript::{InMemoryTranscript, Blake2sTranscript},
-	hash::{Blake2s256,Blake2s},
-	code::BrakedownSpec6,
-	goldilocksMont::GoldilocksMont
-	
+        transcript::{Blake2sTranscript, InMemoryTranscript},
     },
 };
 
@@ -42,9 +44,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-
 const OUTPUT_DIR: &str = "./bench_data/zeromorph_fri_256_8";
-
 
 fn main() {
     let (systems, circuit, k_range) = parse_args();
@@ -53,8 +53,7 @@ fn main() {
 }
 
 fn bench_hyperplonk<C: CircuitExt<Fr>>(k: usize) {
-
-    type ZeromorphFriPcs = ZeromorphFri<Fri<Fr,Blake2s>>;
+    type ZeromorphFriPcs = ZeromorphFri<Fri<Fr, Blake2s>>;
 
     type HyperPlonk = backend::hyperplonk::HyperPlonk<ZeromorphFriPcs>;
 
@@ -68,12 +67,9 @@ fn bench_hyperplonk<C: CircuitExt<Fr>>(k: usize) {
     let param = HyperPlonk::setup(&circuit_info, std_rng()).unwrap();
     end_timer(timer);
 
-
-
     let timer = start_timer(|| format!("hyperplonk_preprocess-{k}"));
     let (pp, vp) = HyperPlonk::preprocess(&param, &circuit_info).unwrap();
     end_timer(timer);
-
 
     let proof = sample(System::HyperPlonk, k, || {
         let _timer = start_timer(|| format!("hyperplonk_prove-{k}"));
@@ -81,13 +77,13 @@ fn bench_hyperplonk<C: CircuitExt<Fr>>(k: usize) {
         HyperPlonk::prove(&pp, &circuit, &mut transcript, std_rng()).unwrap();
         let proof = transcript.into_proof();
 
-	proof
+        proof
     });
     let size = proof.len() * 8;
-    writeln!(&mut (System::HyperPlonk).size_output(), "{}", size).unwrap();	
+    writeln!(&mut (System::HyperPlonk).size_output(), "{}", size).unwrap();
 
     let _timer = start_timer(|| format!("hyperplonk_verify-{k}"));
-    let accept = verifier_sample(System::HyperPlonk, k , || {
+    let accept = verifier_sample(System::HyperPlonk, k, || {
         let mut transcript = Blake2sTranscript::from_proof((), proof.as_slice());
         HyperPlonk::verify(&vp, instances, &mut transcript, std_rng()).is_ok()
     });
@@ -132,18 +128,14 @@ fn bench_halo2<C: CircuitExt<Fr>>(k: usize) {
     assert!(accept);
 }
 
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum System {
-    HyperPlonk
-
+    HyperPlonk,
 }
 
 impl System {
     fn all() -> Vec<System> {
-        vec![
-            System::HyperPlonk,
-        ]
+        vec![System::HyperPlonk]
     }
 
     fn output_path(&self) -> String {
@@ -176,7 +168,7 @@ impl System {
             .append(true)
             .open(self.size_output_path())
             .unwrap()
-    }    
+    }
 
     fn support(&self, circuit: Circuit) -> bool {
         match self {
@@ -197,11 +189,9 @@ impl System {
         match self {
             System::HyperPlonk => match circuit {
                 Circuit::VanillaPlonk => bench_hyperplonk::<VanillaPlonk<Fr>>(k),
-                Circuit::Aggregation => {}//bench_hyperplonk::<AggregationCircuit<Bn256>>(k),
-                Circuit::Sha256 => {}//bench_hyperplonk::<Sha256Circuit>(k),
+                Circuit::Aggregation => {} //bench_hyperplonk::<AggregationCircuit<Bn256>>(k),
+                Circuit::Sha256 => {}      //bench_hyperplonk::<Sha256Circuit>(k),
             },
-
-
         }
     }
 }
@@ -210,7 +200,6 @@ impl Display for System {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             System::HyperPlonk => write!(f, "hyperplonk"),
-
         }
     }
 }
@@ -291,7 +280,7 @@ fn create_output(systems: &[System]) {
     for system in systems {
         File::create(system.output_path()).unwrap();
         File::create(system.verifier_output_path()).unwrap();
-        File::create(system.size_output_path()).unwrap();		
+        File::create(system.size_output_path()).unwrap();
     }
 }
 
@@ -307,7 +296,7 @@ fn sample<T>(system: System, k: usize, prove: impl Fn() -> T) -> T {
     .sum::<Duration>();
     let avg = sum / sample_size as u32;
     writeln!(&mut system.output(), "{}", avg.as_millis()).unwrap();
-    println!("zeromorph: {k}, {}", avg.as_millis());    
+    println!("zeromorph: {k}, {}", avg.as_millis());
     proof.unwrap()
 }
 

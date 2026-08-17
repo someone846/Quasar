@@ -14,7 +14,7 @@ use std::{
     cmp::{max, min},
     collections::BTreeSet,
     fmt::Debug,
-    iter
+    iter,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -54,7 +54,7 @@ impl<F: PrimeField> Brakedown<F> {
                 }
             });
 
-//	let row_len = (((1 << num_vars) as f64).sqrt() as usize).next_power_of_two() as usize;
+        //	let row_len = (((1 << num_vars) as f64).sqrt() as usize).next_power_of_two() as usize;
         let codeword_len = S::codeword_len(log2_q, row_len, n_0);
         let num_column_opening = S::num_column_opening();
         let num_proximity_testing = S::num_proximity_testing(log2_q, row_len, n_0);
@@ -68,6 +68,42 @@ impl<F: PrimeField> Brakedown<F> {
             a,
             b,
         }
+    }
+
+    /// Construct a Brakedown encoder for an explicitly selected message
+    /// length.  BrakingBase fixes the number of matrix rows to `O(log n)`, so
+    /// unlike the ordinary Brakedown PCS it must not choose the row length by
+    /// minimizing Brakedown's square-root proof-size proxy.
+    pub(crate) fn new_with_row_len<S: BrakedownSpec>(
+        row_len: usize,
+        n_0: usize,
+        rng: impl RngCore,
+    ) -> Self {
+        assert!(row_len.is_power_of_two());
+        assert!(row_len > n_0);
+
+        let log2_q = F::NUM_BITS as usize;
+        let codeword_len = S::codeword_len(log2_q, row_len, n_0);
+        let num_column_opening = S::num_column_opening();
+        let num_proximity_testing = S::num_proximity_testing(log2_q, row_len, n_0);
+        let (a, b) = S::matrices(log2_q, row_len, n_0, rng);
+
+        Self {
+            row_len,
+            codeword_len,
+            num_column_opening,
+            num_proximity_testing,
+            a,
+            b,
+        }
+    }
+
+    pub(crate) fn a_matrices(&self) -> &[SparseMatrix<F>] {
+        &self.a
+    }
+
+    pub(crate) fn b_matrices(&self) -> &[SparseMatrix<F>] {
+        &self.b
     }
 }
 
@@ -177,10 +213,10 @@ pub trait BrakedownSpec: Debug {
     }
 
     fn num_column_opening() -> usize {
-//	1
+        //	1
         let numc = ceil(-Self::LAMBDA / (1.0 - Self::delta() / 3.0).log2());
-//	println!("num c {:?}", numc);
-	numc
+        //	println!("num c {:?}", numc);
+        numc
     }
 
     fn num_proximity_testing(log2_q: usize, n: usize, n_0: usize) -> usize {
@@ -267,9 +303,9 @@ impl_spec_128!(
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct SparseMatrixDimension {
-    n: usize,
-    m: usize,
-    d: usize,
+    pub(crate) n: usize,
+    pub(crate) m: usize,
+    pub(crate) d: usize,
 }
 
 impl SparseMatrixDimension {
@@ -304,7 +340,11 @@ impl<F: Field> SparseMatrix<F> {
         Self { dimension, cells }
     }
 
-    fn rows(&self) -> impl Iterator<Item = &[(usize, F)]> {
+    pub(crate) fn dimension(&self) -> SparseMatrixDimension {
+        self.dimension
+    }
+
+    pub(crate) fn rows(&self) -> impl Iterator<Item = &[(usize, F)]> {
         self.cells.chunks(self.dimension.d)
     }
 
@@ -364,7 +404,6 @@ mod test {
         let n = 1 << 30;
         let n_0 = 30;
 
-	
         assert!(S::delta() - delta < 1e-3);
         assert_eq!(S::c_n(n), c_n);
         assert_eq!(S::d_n(log2_q, n), d_n);

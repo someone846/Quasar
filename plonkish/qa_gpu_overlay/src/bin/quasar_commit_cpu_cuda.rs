@@ -1,9 +1,8 @@
 use plonkish_backend::{
     pcs::multilinear::quasar::{
-        commit_and_write, eval_mle_from_evals,
-        prove_qabase_open_full_two_layer_gkr, qabase_split_evaluation_point,
-        setup, trim, verify_qabase_open_full_two_layer_gkr, QABaseCommitment,
-        QABaseProverParams, QABaseVerifierParams, QACodewordColumns,
+        commit_and_write, eval_mle_from_evals, prove_qabase_open_full_two_layer_gkr,
+        qabase_split_evaluation_point, setup, trim, verify_qabase_open_full_two_layer_gkr,
+        QABaseCommitment, QABaseProverParams, QABaseVerifierParams, QACodewordColumns,
     },
     util::{
         arithmetic::Field,
@@ -97,11 +96,9 @@ fn parse_args() -> Config {
                     .expect("invalid --threads")
             }
             "--commit-backend" => {
-                config.backend = QuasarCommitBackend::from_str(read_value(
-                    &mut i,
-                    "--commit-backend",
-                ))
-                .expect("invalid --commit-backend")
+                config.backend =
+                    QuasarCommitBackend::from_str(read_value(&mut i, "--commit-backend"))
+                        .expect("invalid --commit-backend")
             }
             "--gpu-batch-rows" => {
                 config.gpu_batch_rows = read_value(&mut i, "--gpu-batch-rows")
@@ -140,17 +137,9 @@ fn parse_args() -> Config {
     config
 }
 
-fn random_matrix(
-    rows: usize,
-    cols: usize,
-    rng: &mut ChaCha8Rng,
-) -> Vec<Vec<Mersenne127>> {
+fn random_matrix(rows: usize, cols: usize, rng: &mut ChaCha8Rng) -> Vec<Vec<Mersenne127>> {
     (0..rows)
-        .map(|_| {
-            (0..cols)
-                .map(|_| Mersenne127::random(&mut *rng))
-                .collect()
-        })
+        .map(|_| (0..cols).map(|_| Mersenne127::random(&mut *rng)).collect())
         .collect()
 }
 
@@ -232,8 +221,7 @@ fn run(config: Config) -> Result<(), String> {
     let full_point = (0..config.total_k)
         .map(|_| Mersenne127::random(&mut rng))
         .collect::<Vec<_>>();
-    let (z_left, z_right) =
-        qabase_split_evaluation_point(&full_point, rows, row_k);
+    let (z_left, z_right) = qabase_split_evaluation_point(&full_point, rows, row_k);
     let flat_word = word.iter().flatten().copied().collect::<Vec<_>>();
     let claimed_value = eval_mle_from_evals(&flat_word, &full_point);
     drop(flat_word);
@@ -282,8 +270,7 @@ fn run(config: Config) -> Result<(), String> {
             } else {
                 None
             };
-            let mut cuda =
-                CudaQuasarCommitter::new(&pp, &word, config.gpu_batch_rows)?;
+            let mut cuda = CudaQuasarCommitter::new(&pp, &word, config.gpu_batch_rows)?;
             println!("GPU: {}", cuda.device_name()?);
             println!(
                 "one-time pinned input registration: {:.3} ms",
@@ -302,8 +289,7 @@ fn run(config: Config) -> Result<(), String> {
             for sample in 1..=config.samples {
                 let mut transcript = TestTranscript::new(());
                 let commit_start = Instant::now();
-                let (commitment, gpu_timing) =
-                    cuda.commit_and_write(&pp, &mut transcript)?;
+                let (commitment, gpu_timing) = cuda.commit_and_write(&pp, &mut transcript)?;
                 let commit_time = commit_start.elapsed();
 
                 if let Some(cpu_root) = &expected_cpu_root {

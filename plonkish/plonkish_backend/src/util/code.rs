@@ -1,10 +1,13 @@
+pub mod binary_rs;
 mod brakedown;
 mod raa;
-pub mod binary_rs;
-pub use raa::{encode_bits, encode_bits_long, Permutation,repetition_code_long, serial_accumulator_long,encode_bits_ser};
 pub use brakedown::{
     Brakedown, BrakedownSpec, BrakedownSpec1, BrakedownSpec2, BrakedownSpec3, BrakedownSpec4,
     BrakedownSpec5, BrakedownSpec6,
+};
+pub use raa::{
+    encode_bits, encode_bits_long, encode_bits_ser, repetition_code_long, serial_accumulator_long,
+    Permutation,
 };
 
 pub trait LinearCodes<F>: Sync + Send {

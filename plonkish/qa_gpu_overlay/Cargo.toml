@@ -23,3 +23,8 @@ required-features = ["cuda"]
 name = "qa_commit_cpu_cuda"
 path = "src/bin/quasar_commit_cpu_cuda.rs"
 required-features = ["cuda"]
+
+[[bin]]
+name = "matmul_bench_gpu"
+path = "src/bin/matmul_bench_gpu.rs"
+required-features = ["cuda"]

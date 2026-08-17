@@ -28,7 +28,7 @@ use crate::util::binary_extension_fields::B128;
 
 //use crate::util::test::rand_vec;
 use crate::util::avx_int_types::{u64::Blazeu64, BlazeField};
-use crate::util::{hash::Keccak256, avx_int_types::u64};
+use crate::util::{avx_int_types::u64, hash::Keccak256};
 use rand::rngs::OsRng;
 
 use crate::pcs::Commitment;
@@ -200,7 +200,7 @@ pub fn setup<H: Hash>(
     //todo: make sure this is correct
     type Pcs<H> = Basefold<B128, H, Five>;
     let log_num_chunks = 1;
-    //TODO: how is poly size determined? 
+    //TODO: how is poly size determined?
     let split_params = {
         let mut rng = OsRng;
         let poly_size = 1 << (num_vars + 3 - log_num_chunks);
@@ -568,7 +568,7 @@ pub fn open<F: BlazeField, H: Hash>(
 
     let now = Instant::now();
 
-    let mut raa_words = vec![u1,u2,u4];
+    let mut raa_words = vec![u1, u2, u4];
     let mut raa_b128 = Vec::new();
     for word in raa_words {
         raa_b128.push(bf_to_b128_vec_long(&word));
@@ -598,7 +598,7 @@ pub fn open<F: BlazeField, H: Hash>(
     );
     //batch commit to folded_poly_b128, u1,u2,u3,u4,u5
     let now = Instant::now();
-    
+
     let raa_commitments: Vec<BasefoldCommitment<B128, H>> = Pcs::batch_commit_and_write(
         &pp.split_basefold_prover_param,
         &split_polys,
@@ -627,7 +627,7 @@ pub fn open<F: BlazeField, H: Hash>(
         beta,
     );
     let (g2, g2_combo) = build_permutation_polynomials(None, &ml_polys[1], alpha, beta);
-    let binding = vec![f1, f2,g1,g2];
+    let binding = vec![f1, f2, g1, g2];
 
     let split_binding = binding
         .par_iter()
@@ -635,12 +635,15 @@ pub fn open<F: BlazeField, H: Hash>(
         .flatten()
         .collect::<Vec<_>>();
 
-    assert_eq!(split_binding.len(), binding.len() * (1 << pp.log_num_chunks));
+    assert_eq!(
+        split_binding.len(),
+        binding.len() * (1 << pp.log_num_chunks)
+    );
     println!("build perms {:?}", now.elapsed());
     let now = Instant::now();
     let perm_commitments: Vec<BasefoldCommitment<B128, H>> = Pcs::batch_commit_and_write(
         &pp.split_basefold_prover_param,
-        &split_binding, 
+        &split_binding,
         b128transcript,
     )
     .unwrap(); //TWO TRANSCRIPT WRITES
@@ -700,7 +703,7 @@ pub fn open<F: BlazeField, H: Hash>(
         &accum.poly,
         b128transcript,
     );
- // THESE ARE ALL TRANSCRIPT WRITES
+    // THESE ARE ALL TRANSCRIPT WRITES
     println!("sumchecks {:?}", now.elapsed());
     //fix this, this is for the opening
     let mut al_rand_point = &rand_point.clone()[0..pp.split_basefold_prover_param.num_vars];

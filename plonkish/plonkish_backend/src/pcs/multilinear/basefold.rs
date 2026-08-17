@@ -11,7 +11,10 @@ use crate::{
     poly::{multilinear::MultilinearPolynomial, Polynomial},
     util::{
         arithmetic::{div_ceil, horner, inner_product, steps, BatchInvert, Field, PrimeField},
-        code::{Brakedown, BrakedownSpec, LinearCodes, binary_rs::{BinarySubspace, OnTheFlyTwiddleAccess, TwiddleAccess}},
+        code::{
+            binary_rs::{BinarySubspace, OnTheFlyTwiddleAccess, TwiddleAccess},
+            Brakedown, BrakedownSpec, LinearCodes,
+        },
         expression::{Expression, Query, Rotation},
         hash::{Hash, Output},
         new_fields::{Mersenne127, Mersenne61},
@@ -85,7 +88,7 @@ pub struct BasefoldProverParams<F: PrimeField> {
     pub num_vars: usize,
     num_rounds: usize,
     rs_basecode: bool,
-    code_type: String
+    code_type: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -144,6 +147,16 @@ impl<F: PrimeField, H: Hash> BasefoldCommitment<F, H> {
             batch_root: None,
             bh_evals: Type1Polynomial { poly: Vec::new() },
         }
+    }
+
+    /// Drop prover-only codeword and Merkle-tree data while retaining the
+    /// roots needed to verify an opening.  This is used for commitments stored
+    /// in preprocessed verifier parameters.
+    pub(crate) fn verifier_only(&self) -> Self {
+        let root = self.codeword_tree[self.codeword_tree.len() - 1][0].clone();
+        let mut commitment = Self::from_root(root);
+        commitment.batch_root = self.batch_root.clone();
+        commitment
     }
 }
 impl<F: PrimeField, H: Hash> PartialEq for BasefoldCommitment<F, H> {
@@ -264,12 +277,7 @@ where
             &pp.table,
         )
     } else {
-        evaluate_over_foldable_domain(
-            pp.log_rate,
-            coeffs,
-            &pp.table,
-            pp.code_type.clone(),
-        )
+        evaluate_over_foldable_domain(pp.log_rate, coeffs, &pp.table, pp.code_type.clone())
     };
 
     Ok(BasefoldCommitment {
@@ -453,7 +461,7 @@ where
             pp.num_rounds,
             &pp.table_w_weights,
             pp.code_type.clone(),
-            pp.log_rate
+            pp.log_rate,
         );
 
         let (queried_els, queries_usize_) =
@@ -619,7 +627,7 @@ where
             pp.num_rounds,
             &pp.table_w_weights,
             pp.code_type.clone(),
-            pp.log_rate
+            pp.log_rate,
         );
 
         if pp.num_rounds < pp.num_vars {
@@ -704,14 +712,10 @@ where
         });
         //paths for batch: one vector-leaf Merkle path per commitment group
         //and verifier query.
-        batch_paths
-            .iter()
-            .flatten()
-            .flatten()
-            .for_each(|(h1, h2)| {
-                transcript.write_commitment(h1);
-                transcript.write_commitment(h2);
-            });
+        batch_paths.iter().flatten().flatten().for_each(|(h1, h2)| {
+            transcript.write_commitment(h1);
+            transcript.write_commitment(h2);
+        });
 
         //write sum check oracles
 
@@ -864,7 +868,7 @@ where
             &roots,
             vp.rng.clone(),
             &eval,
-            &vp.code_type
+            &vp.code_type,
         );
         let mut next_oracle = Type1Polynomial { poly: final_oracle };
         let mut bh_evals = Type1Polynomial { poly: bh_evals };
@@ -881,7 +885,7 @@ where
                 &vp.table_w_weights,
                 &mut sum_check_oracles,
                 vp.log_rate,
-                vp.code_type.clone()
+                vp.code_type.clone(),
             );
         } else {
             one_level_reverse_interp_hc(&mut bh_evals);
@@ -958,7 +962,6 @@ where
         let mut sum_check_oracles = Vec::new();
 
         for i in 0..vp.num_rounds {
-
             roots.push(transcript.read_commitment().unwrap());
             sum_check_oracles.push(transcript.read_field_elements(3).unwrap());
             fold_challenges.push(transcript.squeeze_challenge());
@@ -975,7 +978,6 @@ where
                 .read_field_elements(1 << (vp.num_vars - vp.num_rounds))
                 .unwrap();
         }
-
 
         let mut query_challenges = transcript.squeeze_challenges(vp.num_verifier_queries);
 
@@ -1064,7 +1066,6 @@ where
             query_merkle_paths.push(merkle_paths);
         }
 
-
         println!("verifier query phase");
         let queries_usize = verifier_query_phase::<F, H>(
             &query_challenges,
@@ -1078,7 +1079,7 @@ where
             &roots,
             vp.rng.clone(),
             &eval,
-            &vp.code_type.clone()
+            &vp.code_type.clone(),
         );
 
         for vq in 0..vp.num_verifier_queries {
@@ -1093,12 +1094,10 @@ where
                     .expect("batch Merkle root pair is empty")
                     .clone();
 
-                let expected_root = group_root
-                    .as_ref()
-                    .unwrap_or_else(|| {
-                        let comm = comms[indices[0]];
-                        &comm.codeword_tree[comm.codeword_tree.len() - 1][0]
-                    });
+                let expected_root = group_root.as_ref().unwrap_or_else(|| {
+                    let comm = comms[indices[0]];
+                    &comm.codeword_tree[comm.codeword_tree.len() - 1][0]
+                });
                 assert_eq!(&path_root, expected_root, "invalid batch Merkle root");
 
                 let leaf_pairs = indices
@@ -1106,11 +1105,7 @@ where
                     .map(|&idx| (ind_queries[vq][idx][0], ind_queries[vq][idx][1]))
                     .collect_vec();
 
-                authenticate_batch_merkle_path::<H, F>(
-                    &path,
-                    &leaf_pairs,
-                    queries_usize[vq],
-                );
+                authenticate_batch_merkle_path::<H, F>(&path, &leaf_pairs, queries_usize[vq]);
             }
         }
 
@@ -1129,7 +1124,7 @@ where
                 &vp.table_w_weights,
                 &mut sum_check_oracles,
                 vp.log_rate,
-                vp.code_type.clone()
+                vp.code_type.clone(),
             );
         } else {
             one_level_reverse_interp_hc(&mut bh_evals);
@@ -1254,14 +1249,16 @@ pub fn evaluate_over_foldable_domain<F: PrimeField>(
     log_rate: usize,
     mut coeffs: Type2Polynomial<F>,
     table: &Vec<Vec<F>>,
-    code_type: String
+    code_type: String,
 ) -> Type1Polynomial<F> {
     //iterate over array, replacing even indices with (evals[i] - evals[(i+1)])
     let k = coeffs.poly.len();
     let logk = log2_strict(k);
     let cl = 1 << (logk + log_rate);
     let rate = 1 << log_rate;
-    let subspace = BinarySubspace::<F>::with_dim(log_rate+logk + 1).ok().unwrap();
+    let subspace = BinarySubspace::<F>::with_dim(log_rate + logk + 1)
+        .ok()
+        .unwrap();
     let twiddle_accesses = OnTheFlyTwiddleAccess::generate(&subspace).ok().unwrap();
     let mut coeffs_with_rep = vec![F::ZERO; cl];
 
@@ -1285,10 +1282,11 @@ pub fn evaluate_over_foldable_domain<F: PrimeField>(
                 for j in half_chunk..chunk_size {
                     let rhs = chunk[j] * level[j - half_chunk];
                     let mut lhs = F::ZERO;
-                    if code_type == "binary_rs".to_string(){
-                        lhs = chunk[j]*twiddle_accesses[logk - i - 1].get_odd_from_even(level[j-half_chunk]);
-                    }
-                    else{
+                    if code_type == "binary_rs".to_string() {
+                        lhs = chunk[j]
+                            * twiddle_accesses[logk - i - 1]
+                                .get_odd_from_even(level[j - half_chunk]);
+                    } else {
                         lhs = -rhs;
                     }
                     chunk[j] = chunk[j - half_chunk] + lhs;
@@ -1416,7 +1414,6 @@ pub fn merkelize<F: PrimeField, H: Hash>(values: &Type1Polynomial<F>) -> Vec<Vec
     }
     tree
 }
-
 
 /// Partition commitments into vector-leaf Merkle groups.
 ///
@@ -1782,8 +1779,6 @@ fn time_sumcheck() {
     let mut eq = build_eq_x_r_vec::<Mersenne127>(&point).unwrap();
     let now = Instant::now();
     (0..60).into_par_iter().for_each(|x| {
-
-
         let oracles = sum_check(evals.clone(), point.clone(), i, i, eq.clone());
     });
     println!("now.elased() {:?}", now.elapsed());
@@ -1804,11 +1799,16 @@ pub fn sum_check_challenge_round<F: PrimeField>(
     //p_i(&bh_values, &eq)
 }
 
-fn query_binary_table<F:PrimeField>(table:&Vec<Vec<(F,F)>>, level: usize, index: usize, subspace: &BinarySubspace<F>) -> (F,F) {
+fn query_binary_table<F: PrimeField>(
+    table: &Vec<Vec<(F, F)>>,
+    level: usize,
+    index: usize,
+    subspace: &BinarySubspace<F>,
+) -> (F, F) {
     assert_eq!(table[level].len(), 1 << level);
     let half_block = (1 << level);
     assert_eq!(index < half_block, true);
-    let even = table[level][index % half_block].0; 
+    let even = table[level][index % half_block].0;
     let twiddle_accesses = OnTheFlyTwiddleAccess::generate(&subspace).unwrap();
     let odd = twiddle_accesses[table.len() - level].get_odd_from_even(even);
     (even, odd)
@@ -1819,11 +1819,13 @@ fn basefold_one_round_by_interpolation_weights<F: PrimeField>(
     table_offset: usize,
     values: &Type1Polynomial<F>,
     challenge: F,
-    num_vars:usize,
-    log_rate:usize,
-    code_type:String
+    num_vars: usize,
+    log_rate: usize,
+    code_type: String,
 ) -> Type1Polynomial<F> {
-    let mut subspace = BinarySubspace::<F>::with_dim(num_vars + log_rate + 1).ok().unwrap();
+    let mut subspace = BinarySubspace::<F>::with_dim(num_vars + log_rate + 1)
+        .ok()
+        .unwrap();
     let twiddle_accesses = OnTheFlyTwiddleAccess::generate(&subspace).unwrap();
     let leveli = table.len() - 1 - table_offset;
     let level = &table[leveli];
@@ -1835,18 +1837,13 @@ fn basefold_one_round_by_interpolation_weights<F: PrimeField>(
         .map(|(i, ys)| {
             let mut x1 = F::ZERO;
             let mut x0 = F::ZERO;
-            if code_type == "binary_rs"{
-                (x0,x1) = query_binary_table(table, leveli, i, &subspace);
-            }
-            else{
+            if code_type == "binary_rs" {
+                (x0, x1) = query_binary_table(table, leveli, i, &subspace);
+            } else {
                 x0 = level[i].0;
                 x1 = -x0;
             }
-            interpolate2_weights::<F>(
-                [(x0, ys[0]), (x1, ys[1])],
-                level[i].1,
-                challenge,
-            )
+            interpolate2_weights::<F>([(x0, ys[0]), (x1, ys[1])], level[i].1, challenge)
         })
         .collect::<Vec<_>>();
     Type1Polynomial { poly: fold }
@@ -2054,8 +2051,8 @@ pub fn query_point_binary_rs<F: PrimeField>(
     eval_index: usize,
     level: usize,
     subspace: &BinarySubspace<F>,
-    log_total_block_length:usize
-) ->(F,F) {
+    log_total_block_length: usize,
+) -> (F, F) {
     let level_index = eval_index % block_length;
     let half_block = block_length >> 1;
     let left_index = level_index % half_block;
@@ -2064,7 +2061,7 @@ pub fn query_point_binary_rs<F: PrimeField>(
 
     let ri0 = left_index; //reverse_bits(left_index, level);
 
-    twiddle_accesses[log_total_block_length - level].get_pair(level-1,ri0)
+    twiddle_accesses[log_total_block_length - level].get_pair(level - 1, ri0)
     /*if level_index >= half_block{
         w_1
     }
@@ -2090,7 +2087,7 @@ fn test_query_point(){
         sim_index = index % ((1 << level) >> 1);
     }
     let subspace = BinarySubspace::<B128>::with_dim(lg_n).ok().unwrap();
-    
+
     let actual_pair = query_binary_table(&table.0, level, sim_index, &subspace);
     let mut actual = B128::ZERO;
     if index >= ((1 << level) >> 1){
@@ -2332,7 +2329,8 @@ mod test {
                 poly: poly.evals().to_vec(),
             });
 
-        let mut commitment = evaluate_over_foldable_domain(log_rate, coeffs.clone(), &table,"random".to_string());
+        let mut commitment =
+            evaluate_over_foldable_domain(log_rate, coeffs.clone(), &table, "random".to_string());
 
         let challenge = rand_chacha::<F>(&mut rng);
         let fold = basefold_one_round_by_interpolation_weights(
@@ -2342,13 +2340,14 @@ mod test {
             challenge,
             num_vars,
             log_rate,
-            "random".to_string()
+            "random".to_string(),
         );
 
         let chal_vec = vec![challenge];
         let partial_eval = multilinear_evaluation_ztoa(&mut coeffs, &chal_vec);
 
-        let mut commitment = evaluate_over_foldable_domain(log_rate, coeffs.clone(), &table,"random".to_string());
+        let mut commitment =
+            evaluate_over_foldable_domain(log_rate, coeffs.clone(), &table, "random".to_string());
 
         assert_eq!(commitment, fold);
 
@@ -2403,7 +2402,7 @@ mod test {
             challenge,
             num_vars,
             log_rate,
-            "random".to_string()
+            "random".to_string(),
         );
 
         let chal_vec = vec![challenge];
@@ -2646,8 +2645,8 @@ fn virtual_open<F: PrimeField>(
     challenges: &mut Vec<F>,
     table: &Vec<Vec<(F, F)>>,
     sum_check_oracles: &mut Vec<Vec<F>>,
-    log_rate:usize,
-    code_type:String
+    log_rate: usize,
+    code_type: String,
 ) {
     let mut rng = ChaCha8Rng::from_entropy();
     let rounds = num_vars - num_rounds;
@@ -2660,7 +2659,15 @@ fn virtual_open<F: PrimeField>(
 
         sum_check_oracles.push(sum_check_challenge_round(eq, bh_evals, challenge));
 
-        oracles.push(basefold_one_round_by_interpolation_weights::<F>(&table, round + num_rounds, &new_oracle, challenge,num_vars,log_rate,code_type.clone()));
+        oracles.push(basefold_one_round_by_interpolation_weights::<F>(
+            &table,
+            round + num_rounds,
+            &new_oracle,
+            challenge,
+            num_vars,
+            log_rate,
+            code_type.clone(),
+        ));
         new_oracle = &oracles[round];
     }
 
@@ -2687,8 +2694,8 @@ fn commit_phase<F: PrimeField, H: Hash>(
     num_vars: usize,
     num_rounds: usize,
     table_w_weights: &Vec<Vec<(F, F)>>,
-    code_type:String,
-    log_rate:usize,
+    code_type: String,
+    log_rate: usize,
 ) -> (
     Vec<Vec<Vec<Output<H>>>>,
     Vec<Vec<F>>,
@@ -2739,7 +2746,7 @@ fn commit_phase<F: PrimeField, H: Hash>(
             challenge,
             num_vars,
             log_rate,
-            code_type.clone()
+            code_type.clone(),
         ));
 
         new_oracle = &oracles[i];
@@ -2835,11 +2842,9 @@ fn verifier_query_phase<F: PrimeField, H: Hash>(
             let x_repr = (*x_index).to_repr();
             let x_bytes: &[u8] = x_repr.as_ref();
 
-            let (int_bytes, _) =
-                x_bytes.split_at(std::mem::size_of::<u32>());
+            let (int_bytes, _) = x_bytes.split_at(std::mem::size_of::<u32>());
 
-            let x_int: u32 =
-                u32::from_be_bytes(int_bytes.try_into().unwrap());
+            let x_int: u32 = u32::from_be_bytes(int_bytes.try_into().unwrap());
 
             (x_int as usize) % n
         })
@@ -2861,10 +2866,9 @@ fn verifier_query_phase<F: PrimeField, H: Hash>(
         GenericArray::from_slice(&iv[..]),
     );
 
-    let subspace =
-        BinarySubspace::<F>::with_dim(num_vars + log_rate + 1)
-            .ok()
-            .unwrap();
+    let subspace = BinarySubspace::<F>::with_dim(num_vars + log_rate + 1)
+        .ok()
+        .unwrap();
 
     // Check every BaseFold query independently.
     queries_usize
@@ -2902,8 +2906,7 @@ fn verifier_query_phase<F: PrimeField, H: Hash>(
                     "BaseFold query index should be normalized to the even sibling"
                 );
 
-                let ri0 =
-                    reverse_bits(cur_index, num_vars + log_rate - i);
+                let ri0 = reverse_bits(cur_index, num_vars + log_rate - i);
 
                 let (x0, x1): (F, F) = if code_type == "binary_rs" {
                     query_point_binary_rs::<F>(
@@ -2926,10 +2929,7 @@ fn verifier_query_phase<F: PrimeField, H: Hash>(
                 };
 
                 let folded_query = interpolate2::<F>(
-                    [
-                        (x0, cur_queries[i][0]),
-                        (x1, cur_queries[i][1]),
-                    ],
+                    [(x0, cur_queries[i][0]), (x1, cur_queries[i][1])],
                     fold_challenges[i],
                 );
 
@@ -3102,10 +3102,10 @@ fn get_table_aes<F: PrimeField>(
 
     return (unflattened_table_w_weights, unflattened_table);
 }
-//dimension of this table is double the size as it contains 
+//dimension of this table is double the size as it contains
 pub fn get_table_additive_binary<F: PrimeField>(
     poly_size: usize,
-    rate: usize
+    rate: usize,
 ) -> (Vec<Vec<(F, F)>>, Vec<Vec<F>>) {
     let lg_n: usize = rate + log2_strict(poly_size);
 
@@ -3114,23 +3114,19 @@ pub fn get_table_additive_binary<F: PrimeField>(
     // Create a binary subspace for the twiddle factors
     let subspace = BinarySubspace::<F>::with_dim(lg_n + 1).ok().unwrap();
     let twiddle_accesses = OnTheFlyTwiddleAccess::generate(&subspace).unwrap();
-    
-    
+
     // Generate flat table using twiddle factors
-    let mut flat_table = Vec::with_capacity(1 << (lg_n)); 
+    let mut flat_table = Vec::with_capacity(1 << (lg_n));
     //1 to lg_n
-    for j in 1..lg_n + 1{
-        for i in 0..(1 << j){
+    for j in 1..lg_n + 1 {
+        for i in 0..(1 << j) {
             let j_t = &twiddle_accesses[lg_n - j];
-            let (w_0,w_1) = j_t.get_pair(j-1,i);
-            flat_table.push((w_0,w_1)); 
+            let (w_0, w_1) = j_t.get_pair(j - 1, i);
+            flat_table.push((w_0, w_1));
         }
     }
 
-
-    let mut weights: Vec<F> = flat_table
-        .iter().map(|(w0,w1)|*w1 - *w0)
-        .collect();
+    let mut weights: Vec<F> = flat_table.iter().map(|(w0, w1)| *w1 - *w0).collect();
 
     let mut scratch_space = vec![F::ZERO; weights.len()];
     BatchInverter::invert_with_external_scratch(&mut weights, &mut scratch_space);
@@ -3141,7 +3137,7 @@ pub fn get_table_additive_binary<F: PrimeField>(
         .map(|(el, w)| (el.0, w))
         .collect_vec();
 
-    assert_eq!(flat_table_w_weights.len(),flat_table.len());
+    assert_eq!(flat_table_w_weights.len(), flat_table.len());
 
     let mut unflattened_table_w_weights = vec![Vec::new(); lg_n];
     let mut unflattened_table = vec![Vec::<F>::new(); lg_n];
@@ -3153,16 +3149,18 @@ pub fn get_table_additive_binary<F: PrimeField>(
     let mut unflattened_table_w_weights = vec![Vec::new(); lg_n];
     let mut unflattened_table = vec![Vec::new(); lg_n];
 
-
     unflattened_table[0] = vec![F::ZERO];
     unflattened_table_w_weights[0] = vec![(F::ZERO, F::ZERO)];
-    for i in 0..(lg_n-1) {
-        unflattened_table[i+1] = flat_table[((1 << (i+1)) - 2)..((1 << (i + 2)) - 2)].to_vec().iter().map(|f| f.0).collect::<Vec<_>>();
-        let mut level = flat_table_w_weights[((1 << (i+1)) - 2)..((1 << (i + 2)) - 2)].to_vec();
+    for i in 0..(lg_n - 1) {
+        unflattened_table[i + 1] = flat_table[((1 << (i + 1)) - 2)..((1 << (i + 2)) - 2)]
+            .to_vec()
+            .iter()
+            .map(|f| f.0)
+            .collect::<Vec<_>>();
+        let mut level = flat_table_w_weights[((1 << (i + 1)) - 2)..((1 << (i + 2)) - 2)].to_vec();
         reverse_index_bits_in_place(&mut level);
-        unflattened_table_w_weights[i+1] =level;
+        unflattened_table_w_weights[i + 1] = level;
     }
 
     return (unflattened_table_w_weights, unflattened_table);
 }
-

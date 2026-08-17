@@ -1,5 +1,5 @@
-use crate::util::avx_int_types::BlazeField;
 use crate::util::arithmetic::PrimeField;
+use crate::util::avx_int_types::BlazeField;
 use blake2b_simd::{
     many::{hash_many, HashManyJob},
     Hash as BHash, Params, State, OUTBYTES,
@@ -32,7 +32,7 @@ pub trait Hash:
         Self::default()
     }
 
-    fn update_blaze_field<F:BlazeField>(&mut self, el: &F) {
+    fn update_blaze_field<F: BlazeField>(&mut self, el: &F) {
         Digest::update(self, el.to_le_bytes());
     }
     fn update_field_element(&mut self, field: &impl PrimeField) {

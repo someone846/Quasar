@@ -4,6 +4,19 @@ plonkish/benchmark/bench_data/
 target/
 benchmark/bench_data/
 
+# Generated benchmark and experiment data (at any nesting level).
+**/bench_data/
+**/benchmark_results/
+**/results/
+**/outputs/
+
+# Generated tabular/binary datasets.
+*.csv
+*.tsv
+*.parquet
+*.npy
+*.npz
+
 *.log
 *.out
 *.prof

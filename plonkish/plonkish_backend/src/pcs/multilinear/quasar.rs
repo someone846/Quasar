@@ -1,12 +1,11 @@
 #![allow(clippy::too_many_arguments)]
 
 use crate::{
-    Error,
-    pcs::{Evaluation, Point, PolynomialCommitmentScheme},
     pcs::multilinear::{
-        Basefold, BasefoldCommitment, BasefoldExtParams, BasefoldParams,
-        BasefoldProverParams, BasefoldVerifierParams,
+        Basefold, BasefoldCommitment, BasefoldExtParams, BasefoldParams, BasefoldProverParams,
+        BasefoldVerifierParams,
     },
+    pcs::{Evaluation, Point, PolynomialCommitmentScheme},
     poly::multilinear::MultilinearPolynomial,
     util::{
         arithmetic::{Field, PrimeField},
@@ -14,6 +13,7 @@ use crate::{
         transcript::{TranscriptRead, TranscriptWrite},
         Deserialize, DeserializeOwned, Serialize,
     },
+    Error,
 };
 
 use rayon::prelude::*;
@@ -74,10 +74,7 @@ impl QABaseSecurityConfig {
 pub fn qabase_gp(delta: f64, field_bits: usize) -> f64 {
     assert!(delta > 0.0 && delta < 1.0);
     let bits = field_bits as f64;
-    1.0 - delta
-        + (delta * delta.log2()
-            + (1.0 - delta) * (1.0 - delta).log2())
-            / bits
+    1.0 - delta + (delta * delta.log2() + (1.0 - delta) * (1.0 - delta).log2()) / bits
 }
 
 fn log2_add(a: f64, b: f64) -> f64 {
@@ -100,8 +97,7 @@ pub fn qabase_distance_failure_log2(
     let log_n = row_log_size as f64;
     let log_p = field_bits as f64;
     let log_p_minus_one = field_bits as f64;
-    let eps = qabase_gp(delta, field_bits)
-        - (1.0 + log_n / log_p) / (c as f64);
+    let eps = qabase_gp(delta, field_bits) - (1.0 + log_n / log_p) / (c as f64);
 
     if eps <= 0.0 {
         return f64::INFINITY;
@@ -114,20 +110,14 @@ pub fn qabase_distance_failure_log2(
         0.0
     };
 
-    let log_term1_a =
-        ((c * (c - 1)) as f64 / 2.0).log2() + log_n - 2.0 * log_p;
-    let threshold1 =
-        (((c - 1) as f64) / ((c as f64) * delta)).ceil();
-    let log_term1_b = -log_p * threshold1 * (c as f64) * eps
-        - denom_log
-        - log_p_minus_one;
+    let log_term1_a = ((c * (c - 1)) as f64 / 2.0).log2() + log_n - 2.0 * log_p;
+    let threshold1 = (((c - 1) as f64) / ((c as f64) * delta)).ceil();
+    let log_term1_b = -log_p * threshold1 * (c as f64) * eps - denom_log - log_p_minus_one;
     let log_bound1 = log2_add(log_term1_a, log_term1_b);
 
     let log_term2_a = (c as f64).log2() + log_n - log_p;
     let threshold2 = (1.0 / delta).ceil();
-    let log_term2_b = -log_p * threshold2 * (c as f64) * eps
-        - denom_log
-        - log_p_minus_one;
+    let log_term2_b = -log_p * threshold2 * (c as f64) * eps - denom_log - log_p_minus_one;
     let log_bound2 = log2_add(log_term2_a, log_term2_b);
 
     log_bound1.min(log_bound2)
@@ -145,12 +135,8 @@ pub fn qabase_distance_lower_bound(
 
     for _ in 0..100 {
         let mid = (lo + hi) * 0.5;
-        let failure_log2 = qabase_distance_failure_log2(
-            mid,
-            row_log_size,
-            inverse_rate,
-            field_bits,
-        );
+        let failure_log2 =
+            qabase_distance_failure_log2(mid, row_log_size, inverse_rate, field_bits);
         if failure_log2 <= target_log2 {
             lo = mid;
         } else {
@@ -204,7 +190,7 @@ pub struct QABaseFoldConfig;
 
 impl BasefoldExtParams for QABaseFoldConfig {
     fn get_reps() -> usize {
-        241
+        249
     }
 
     fn get_rate() -> usize {
@@ -299,8 +285,7 @@ where
         } else if step >= 1024 {
             x.chunks_mut(chunk_len).for_each(|chunk| {
                 let (left, right) = chunk.split_at_mut(step);
-                left
-                    .par_iter_mut()
+                left.par_iter_mut()
                     .zip(right.par_iter_mut())
                     .for_each(|(l, r)| {
                         let u = *l;
@@ -429,9 +414,7 @@ where
 /// The previous implementation allocated one short vector per column.  At
 /// total_k=28, c=2 this meant 2^23 heap allocations.  Streaming the row values
 /// directly into the hasher preserves the exact leaf hash and Merkle root.
-pub fn merkelize_long<H, F>(
-    codeword: &impl QACodewordRows<F>,
-) -> Vec<Vec<Output<H>>>
+pub fn merkelize_long<H, F>(codeword: &impl QACodewordRows<F>) -> Vec<Vec<Output<H>>>
 where
     H: Hash,
     F: PrimeField,
@@ -522,11 +505,7 @@ where
         .collect::<Result<Vec<_>, _>>()
 }
 
-fn authenticate_merkle_path<H>(
-    leaf: &Output<H>,
-    path: &[Output<H>],
-    index: usize,
-) -> Output<H>
+fn authenticate_merkle_path<H>(leaf: &Output<H>, path: &[Output<H>], index: usize) -> Output<H>
 where
     H: Hash,
 {
@@ -631,6 +610,23 @@ pub trait QACodewordColumns<F>: Send + Sync {
 }
 
 impl<F> QACodewordRows<F> for Vec<Vec<F>>
+where
+    F: Send + Sync,
+{
+    fn num_rows(&self) -> usize {
+        self.len()
+    }
+
+    fn num_cols(&self) -> usize {
+        self.first().map_or(0, Vec::len)
+    }
+
+    fn row(&self, row_index: usize) -> &[F] {
+        &self[row_index]
+    }
+}
+
+impl<F> QACodewordRows<F> for [Vec<F>]
 where
     F: Send + Sync,
 {
@@ -810,26 +806,25 @@ where
 
 pub fn commit_and_write<F, H>(
     pp: &QABaseProverParams<F, H>,
-    word: &[Vec<F>],
+    word: &(impl QACodewordRows<F> + ?Sized),
     transcript: &mut impl TranscriptWrite<CommitmentChunk<H>, F>,
 ) -> QABaseCommitment<F, H>
 where
     F: PrimeField + Serialize + DeserializeOwned,
     H: Hash,
 {
-    assert_eq!(word.len(), pp.num_rows);
-    assert!(word.iter().all(|row| row.len() == (1usize << pp.num_vars)));
+    assert_eq!(word.num_rows(), pp.num_rows);
+    assert_eq!(word.num_cols(), 1usize << pp.num_vars);
+    for i in 0..word.num_rows() {
+        assert_eq!(word.row(i).len(), word.num_cols());
+    }
 
     let now = Instant::now();
-    let codeword = word
-        .par_iter()
-        .map(|row| qa_encode_codeword_only(row, &pp.qa_params))
+    let codeword = (0..word.num_rows())
+        .into_par_iter()
+        .map(|i| qa_encode_codeword_only(word.row(i), &pp.qa_params))
         .collect::<Vec<_>>();
-    println!(
-        "degree {}, QA encode {:?}",
-        pp.num_vars,
-        now.elapsed(),
-    );
+    println!("degree {}, QA encode {:?}", pp.num_vars, now.elapsed(),);
 
     commit_encoded_and_write(pp, codeword, transcript)
 }
@@ -908,11 +903,7 @@ fn log2_power_of_two(x: usize) -> usize {
     x.trailing_zeros() as usize
 }
 
-pub fn equality_mle_eval_at_index<F>(
-    index: usize,
-    num_vars: usize,
-    point: &[F],
-) -> F
+pub fn equality_mle_eval_at_index<F>(index: usize, num_vars: usize, point: &[F]) -> F
 where
     F: PrimeField,
 {
@@ -971,10 +962,7 @@ fn eval_poly<F: PrimeField>(poly: &MultilinearPolynomial<F>, point: &[F]) -> F {
     poly.evaluate(point)
 }
 
-pub fn qabase_row_weights_from_z_left<F>(
-    num_rows: usize,
-    z_left: &[F],
-) -> Vec<F>
+pub fn qabase_row_weights_from_z_left<F>(num_rows: usize, z_left: &[F]) -> Vec<F>
 where
     F: PrimeField,
 {
@@ -1010,18 +998,21 @@ where
 
 /// One matrix scan computes both switched rows.
 fn linear_combine_rows_pair_parallel<F>(
-    rows: &[Vec<F>],
+    rows: &(impl QACodewordRows<F> + ?Sized),
     weights_a: &[F],
     weights_b: &[F],
 ) -> (Vec<F>, Vec<F>)
 where
     F: PrimeField + Send + Sync,
 {
-    assert!(!rows.is_empty());
-    assert_eq!(rows.len(), weights_a.len());
-    assert_eq!(rows.len(), weights_b.len());
-    let row_len = rows[0].len();
-    assert!(rows.iter().all(|row| row.len() == row_len));
+    let num_rows = rows.num_rows();
+    assert!(num_rows > 0);
+    assert_eq!(num_rows, weights_a.len());
+    assert_eq!(num_rows, weights_b.len());
+    let row_len = rows.num_cols();
+    for i in 0..num_rows {
+        assert_eq!(rows.row(i).len(), row_len);
+    }
 
     let mut out_a = vec![F::ZERO; row_len];
     let mut out_b = vec![F::ZERO; row_len];
@@ -1032,8 +1023,8 @@ where
         .for_each(|(j, (a, b))| {
             let mut acc_a = F::ZERO;
             let mut acc_b = F::ZERO;
-            for i in 0..rows.len() {
-                let value = rows[i][j];
+            for i in 0..num_rows {
+                let value = rows.row(i)[j];
                 acc_a += weights_a[i] * value;
                 acc_b += weights_b[i] * value;
             }
@@ -1143,11 +1134,8 @@ where
         middle_evals.push(middle);
     }
 
-    let commitments = Pcs::<F, H>::batch_commit_and_write(
-        &pp.basefold_prover_param,
-        polys.iter(),
-        transcript,
-    )?;
+    let commitments =
+        Pcs::<F, H>::batch_commit_and_write(&pp.basefold_prover_param, polys.iter(), transcript)?;
 
     if commitments.len() != polys.len() {
         return Err(Error::InvalidPcsOpen(
@@ -1176,11 +1164,8 @@ where
 {
     type Pcs<F, H> = Basefold<F, H, QABaseFoldConfig>;
     let count = num_instances * vp.inverse_rate;
-    let commitments = Pcs::<F, H>::read_commitments(
-        &vp.basefold_verifier_param,
-        count,
-        transcript,
-    )?;
+    let commitments =
+        Pcs::<F, H>::read_commitments(&vp.basefold_verifier_param, count, transcript)?;
     if commitments.len() != count {
         return Err(Error::InvalidPcsOpen(
             "wrong endpoint commitment count".to_string(),
@@ -1410,12 +1395,10 @@ where
     for b in 0..k {
         let mut per_instance = Vec::with_capacity(num_parity);
         for i in 0..num_parity {
-            let output_poly =
-                &endpoint_data.polys[layout.block_poly_index(b, i + 1)];
+            let output_poly = &endpoint_data.polys[layout.block_poly_index(b, i + 1)];
             let value = eval_poly(output_poly, &gammas[b][i]);
             transcript.write_field_element(&value)?;
-            claimed_output_batch +=
-                instance_powers[b] * block_powers[i] * value;
+            claimed_output_batch += instance_powers[b] * block_powers[i] * value;
             per_instance.push(value);
         }
         output_evals_at_gammas.push(per_instance);
@@ -1447,12 +1430,12 @@ where
     outer_poly_refs.extend(pp.e_polys.iter());
 
     let make_term = |b: usize, i: usize| -> Expression<F> {
-        let v: Expression<F> = Expression::<F>::Polynomial(Query::new(v_start + b, Rotation::cur()));
-        let h: Expression<F> = Expression::<F>::Polynomial(Query::new(
-            h_start + b * num_parity + i,
-            Rotation::cur(),
-        ));
-        let e: Expression<F> = Expression::<F>::Polynomial(Query::new(e_start + i, Rotation::cur()));
+        let v: Expression<F> =
+            Expression::<F>::Polynomial(Query::new(v_start + b, Rotation::cur()));
+        let h: Expression<F> =
+            Expression::<F>::Polynomial(Query::new(h_start + b * num_parity + i, Rotation::cur()));
+        let e: Expression<F> =
+            Expression::<F>::Polynomial(Query::new(e_start + i, Rotation::cur()));
         v * h * e
     };
 
@@ -1467,12 +1450,8 @@ where
 
     let no_challenges: Vec<F> = Vec::new();
     let no_ys: Vec<Vec<F>> = Vec::new();
-    let outer_virtual_poly = VirtualPolynomial::new(
-        &outer_expression,
-        outer_poly_refs,
-        &no_challenges,
-        &no_ys,
-    );
+    let outer_virtual_poly =
+        VirtualPolynomial::new(&outer_expression, outer_poly_refs, &no_challenges, &no_ys);
     let (outer_point, outer_terminal_evals) = Sc::<F>::prove(
         &(),
         num_vars,
@@ -1514,14 +1493,11 @@ where
     drop(outer_owned_polys);
     drop(outer_expression);
 
-    let h_outer = MultilinearPolynomial::new(
-        hadamard_tensor_mle_evals_on_hypercube(&outer_point),
-    );
+    let h_outer = MultilinearPolynomial::new(hadamard_tensor_mle_evals_on_hypercube(&outer_point));
     let n = 1usize << num_vars;
     let mut combined_input_evals = vec![F::ZERO; n];
     for b in 0..k {
-        let input =
-            &endpoint_data.polys[layout.block_poly_index(b, 0)].evals;
+        let input = &endpoint_data.polys[layout.block_poly_index(b, 0)].evals;
         let weight = instance_weights_at_outer_point[b];
         combined_input_evals
             .par_iter_mut()
@@ -1530,18 +1506,12 @@ where
     }
     let combined_input = MultilinearPolynomial::new(combined_input_evals);
 
-    let inner_h: Expression<F> =
-        Expression::<F>::Polynomial(Query::new(0, Rotation::cur()));
-    let inner_input: Expression<F> =
-        Expression::<F>::Polynomial(Query::new(1, Rotation::cur()));
+    let inner_h: Expression<F> = Expression::<F>::Polynomial(Query::new(0, Rotation::cur()));
+    let inner_input: Expression<F> = Expression::<F>::Polynomial(Query::new(1, Rotation::cur()));
     let inner_expression: Expression<F> = inner_h * inner_input;
     let inner_polys = vec![h_outer, combined_input];
-    let inner_virtual_poly = VirtualPolynomial::new(
-        &inner_expression,
-        &inner_polys,
-        &no_challenges,
-        &no_ys,
-    );
+    let inner_virtual_poly =
+        VirtualPolynomial::new(&inner_expression, &inner_polys, &no_challenges, &no_ys);
     let (inner_point, inner_terminal_evals) = Sc::<F>::prove(
         &(),
         num_vars,
@@ -1629,20 +1599,14 @@ where
         let mut per_instance = Vec::with_capacity(num_parity);
         for i in 0..num_parity {
             let value = transcript.read_field_element()?;
-            claimed_output_batch +=
-                instance_powers[b] * block_powers[i] * value;
+            claimed_output_batch += instance_powers[b] * block_powers[i] * value;
             per_instance.push(value);
         }
         output_evals_at_gammas.push(per_instance);
     }
 
-    let (outer_terminal_eval, outer_point) = Sc::<F>::verify(
-        &(),
-        num_vars,
-        3usize,
-        claimed_output_batch,
-        transcript,
-    )?;
+    let (outer_terminal_eval, outer_point) =
+        Sc::<F>::verify(&(), num_vars, 3usize, claimed_output_batch, transcript)?;
 
     let mut e_evals_at_outer_point = Vec::with_capacity(num_parity);
     for _ in 0..num_parity {
@@ -1657,13 +1621,8 @@ where
         &e_evals_at_outer_point,
     );
 
-    let (inner_terminal_eval, inner_point) = Sc::<F>::verify(
-        &(),
-        num_vars,
-        2usize,
-        outer_terminal_eval,
-        transcript,
-    )?;
+    let (inner_terminal_eval, inner_point) =
+        Sc::<F>::verify(&(), num_vars, 2usize, outer_terminal_eval, transcript)?;
 
     let mut input_evals_at_inner_point = Vec::with_capacity(k);
     let mut combined_input_eval = F::ZERO;
@@ -1879,11 +1838,8 @@ where
             .read_column(full_index)
             .map_err(Error::InvalidPcsOpen)?;
         transcript.write_field_elements(&opened_column)?;
-        let (proximity, evaluation) = fold_opened_column_pair(
-            &opened_column,
-            proximity_weights,
-            evaluation_weights,
-        );
+        let (proximity, evaluation) =
+            fold_opened_column_pair(&opened_column, proximity_weights, evaluation_weights);
         proximity_values.push(proximity);
         evaluation_values.push(evaluation);
     }
@@ -1908,8 +1864,7 @@ where
     }
 
     let make_term = |block: usize| -> Expression<F> {
-        let h: Expression<F> =
-            Expression::<F>::Polynomial(Query::new(3 * block, Rotation::cur()));
+        let h: Expression<F> = Expression::<F>::Polynomial(Query::new(3 * block, Rotation::cur()));
         let u: Expression<F> =
             Expression::<F>::Polynomial(Query::new(3 * block + 1, Rotation::cur()));
         let q: Expression<F> =
@@ -1923,15 +1878,9 @@ where
 
     let challenges: Vec<F> = Vec::new();
     let ys: Vec<Vec<F>> = Vec::new();
-    let virtual_poly =
-        VirtualPolynomial::new(&expression, poly_refs, &challenges, &ys);
-    let (sc_point, terminal_evals) = Sc::<F>::prove(
-        &(),
-        pp.num_vars,
-        virtual_poly,
-        claimed_sum,
-        transcript,
-    )?;
+    let virtual_poly = VirtualPolynomial::new(&expression, poly_refs, &challenges, &ys);
+    let (sc_point, terminal_evals) =
+        Sc::<F>::prove(&(), pp.num_vars, virtual_poly, claimed_sum, transcript)?;
     if terminal_evals.len() != 3 * rho {
         return Err(Error::InvalidSumcheck(
             "wrong merged selector terminal vector".to_string(),
@@ -2007,19 +1956,11 @@ where
     for &full_index in &query_indices {
         let path = read_merkle_path::<H, F>(num_cols, transcript)?;
         let opened_column = transcript.read_field_elements(vp.num_rows)?;
-        if !verify_merkle_path_with_leaf::<H, F>(
-            root,
-            &opened_column,
-            &path,
-            full_index,
-        ) {
+        if !verify_merkle_path_with_leaf::<H, F>(root, &opened_column, &path, full_index) {
             return Ok((false, None));
         }
-        let (proximity, evaluation) = fold_opened_column_pair(
-            &opened_column,
-            proximity_weights,
-            evaluation_weights,
-        );
+        let (proximity, evaluation) =
+            fold_opened_column_pair(&opened_column, proximity_weights, evaluation_weights);
         proximity_values.push(proximity);
         evaluation_values.push(evaluation);
     }
@@ -2029,13 +1970,8 @@ where
     let claimed_sum = qabase_weighted_sum(&proximity_values, tau)
         + instance_batch_challenge * qabase_weighted_sum(&evaluation_values, tau);
 
-    let (terminal_eval, sc_point) = Sc::<F>::verify(
-        &(),
-        vp.num_vars,
-        2usize,
-        claimed_sum,
-        transcript,
-    )?;
+    let (terminal_eval, sc_point) =
+        Sc::<F>::verify(&(), vp.num_vars, 2usize, claimed_sum, transcript)?;
 
     let mut proximity_block_evals = Vec::with_capacity(rho);
     let mut evaluation_block_evals = Vec::with_capacity(rho);
@@ -2046,15 +1982,9 @@ where
         proximity_block_evals.push(u);
         evaluation_block_evals.push(q);
 
-        let selector_eval = selector_block_eval_at_point(
-            block,
-            block_len,
-            &query_indices,
-            tau,
-            &sc_point,
-        );
-        expected_terminal +=
-            selector_eval * (u + instance_batch_challenge * q);
+        let selector_eval =
+            selector_block_eval_at_point(block, block_len, &query_indices, tau, &sc_point);
+        expected_terminal += selector_eval * (u + instance_batch_challenge * q);
 
         push_basefold_opening_claim(
             &mut acc.points,
@@ -2120,7 +2050,7 @@ impl QABaseFullOpenTwoLayerGkrVerifierOutput {
 
 pub fn prove_qabase_open_full_two_layer_gkr<F, H>(
     pp: &QABaseProverParams<F, H>,
-    word: &[Vec<F>],
+    word: &(impl QACodewordRows<F> + ?Sized),
     comm: &QABaseCommitment<F, H, impl QACodewordColumns<F>>,
     z_left: Vec<F>,
     z_right: Vec<F>,
@@ -2134,8 +2064,9 @@ where
     type Pcs<F, H> = Basefold<F, H, QABaseFoldConfig>;
     let now = Instant::now();
 
-    if word.len() != pp.num_rows
-        || word.iter().any(|row| row.len() != (1usize << pp.num_vars))
+    if word.num_rows() != pp.num_rows
+        || word.num_cols() != (1usize << pp.num_vars)
+        || (0..word.num_rows()).any(|i| word.row(i).len() != word.num_cols())
         || z_left.len() != log2_power_of_two(pp.num_rows)
         || z_right.len() != pp.num_vars
     {
@@ -2147,19 +2078,15 @@ where
     let row_challenges = transcript.squeeze_challenges(pp.num_rows);
     let row_weights = qabase_row_weights_from_z_left(pp.num_rows, &z_left);
 
-    let (proximity_input, evaluation_input) = linear_combine_rows_pair_parallel(
-        word,
-        &row_challenges,
-        &row_weights,
-    );
+    let (proximity_input, evaluation_input) =
+        linear_combine_rows_pair_parallel(word, &row_challenges, &row_weights);
 
     let mut endpoint_data = commit_endpoint_instances_with_basefold(
         pp,
         vec![proximity_input, evaluation_input],
         transcript,
     )?;
-    let endpoint_commitment_count =
-        endpoint_data.commitments.block_commitments.len();
+    let endpoint_commitment_count = endpoint_data.commitments.block_commitments.len();
 
     // Run GKR before constructing the borrowed BaseFold accumulator, because
     // GKR moves `middle_evals` out of endpoint_data to release that memory.
@@ -2171,15 +2098,9 @@ where
             .collect(),
         e_start: endpoint_data.commitments.num_instances * pp.inverse_rate,
     };
-    let gkr = prove_qabase_two_layer_gkr_batch(
-        pp,
-        &mut endpoint_data,
-        &gkr_layout,
-        transcript,
-    )?;
+    let gkr = prove_qabase_two_layer_gkr_batch(pp, &mut endpoint_data, &gkr_layout, transcript)?;
 
-    let (mut opening_acc, layout) =
-        build_two_layer_gkr_prover_accumulator(&endpoint_data, pp);
+    let (mut opening_acc, layout) = build_two_layer_gkr_prover_accumulator(&endpoint_data, pp);
     collect_two_layer_gkr_claims_prover(&mut opening_acc, &layout, &gkr);
 
     let column_consistency = prove_merged_column_consistency(
@@ -2257,9 +2178,7 @@ where
     type Pcs<F, H> = Basefold<F, H, QABaseFoldConfig>;
     let now = Instant::now();
 
-    if z_left.len() != log2_power_of_two(vp.num_rows)
-        || z_right.len() != vp.num_vars
-    {
+    if z_left.len() != log2_power_of_two(vp.num_rows) || z_right.len() != vp.num_vars {
         return Err(Error::InvalidPcsParam(
             "invalid Quasar evaluation point dimensions".to_string(),
         ));
@@ -2274,15 +2193,12 @@ where
     let row_challenges = transcript.squeeze_challenges(vp.num_rows);
     let row_weights = qabase_row_weights_from_z_left(vp.num_rows, &z_left);
 
-    let endpoint_commitments =
-        read_endpoint_block_commitments(vp, 2, transcript)?;
-    let endpoint_commitment_count =
-        endpoint_commitments.block_commitments.len();
+    let endpoint_commitments = read_endpoint_block_commitments(vp, 2, transcript)?;
+    let endpoint_commitment_count = endpoint_commitments.block_commitments.len();
     let (mut opening_acc, layout) =
         build_two_layer_gkr_verifier_accumulator(&endpoint_commitments, vp);
 
-    let (ok_gkr, gkr) =
-        verify_qabase_two_layer_gkr_batch(vp, 2, transcript)?;
+    let (ok_gkr, gkr) = verify_qabase_two_layer_gkr_batch(vp, 2, transcript)?;
     if !ok_gkr {
         return Ok((false, QABaseFullOpenTwoLayerGkrVerifierOutput::rejected()));
     }
@@ -2358,11 +2274,7 @@ mod test {
 
     type TestTranscript = Blake2sTranscript<Cursor<Vec<u8>>>;
 
-    fn random_matrix(
-        rows: usize,
-        cols: usize,
-        rng: &mut ChaCha8Rng,
-    ) -> Vec<Vec<Fr>> {
+    fn random_matrix(rows: usize, cols: usize, rng: &mut ChaCha8Rng) -> Vec<Vec<Fr>> {
         (0..rows)
             .map(|_| (0..cols).map(|_| Fr::random(&mut *rng)).collect())
             .collect()
@@ -2401,18 +2313,14 @@ mod test {
         let num_vars = 3usize;
         let mut rng = ChaCha8Rng::from_seed([17u8; 32]);
         let word = random_matrix(num_rows, row_size, &mut rng);
-        let full_point = (0..5)
-            .map(|_| Fr::random(&mut rng))
-            .collect::<Vec<_>>();
+        let full_point = (0..5).map(|_| Fr::random(&mut rng)).collect::<Vec<_>>();
 
         let flat = word.iter().flatten().copied().collect::<Vec<_>>();
         let direct = eval_mle_from_evals(&flat, &full_point);
-        let (z_left, z_right) =
-            qabase_split_evaluation_point(&full_point, num_rows, num_vars);
+        let (z_left, z_right) = qabase_split_evaluation_point(&full_point, num_rows, num_vars);
         let weights = qabase_row_weights_from_z_left(num_rows, &z_left);
         let zero = vec![Fr::ZERO; num_rows];
-        let (eval_msg, _) =
-            linear_combine_rows_pair_parallel(&word, &weights, &zero);
+        let (eval_msg, _) = linear_combine_rows_pair_parallel(&word, &weights, &zero);
         let decomposed = eval_mle_from_evals(&eval_msg, &z_right);
         assert_eq!(direct, decomposed);
     }
@@ -2438,8 +2346,7 @@ mod test {
             let full_point = (0..(num_vars + 2))
                 .map(|_| Fr::random(&mut rng))
                 .collect::<Vec<_>>();
-            let (z_left, z_right) =
-                qabase_split_evaluation_point(&full_point, num_rows, num_vars);
+            let (z_left, z_right) = qabase_split_evaluation_point(&full_point, num_rows, num_vars);
             let flat = word.iter().flatten().copied().collect::<Vec<_>>();
             let claimed_value = eval_mle_from_evals(&flat, &full_point);
 
@@ -2455,18 +2362,11 @@ mod test {
                 &mut prover_transcript,
             )
             .unwrap();
-            assert_eq!(
-                prover_output.endpoint_commitment_count,
-                2 * inverse_rate,
-            );
-            assert!(
-                prover_output.unique_opening_point_count
-                    < prover_output.opening_claim_count
-            );
+            assert_eq!(prover_output.endpoint_commitment_count, 2 * inverse_rate,);
+            assert!(prover_output.unique_opening_point_count < prover_output.opening_claim_count);
 
             let proof = prover_transcript.into_proof();
-            let mut verifier_transcript =
-                TestTranscript::from_proof((), proof.as_slice());
+            let mut verifier_transcript = TestTranscript::from_proof((), proof.as_slice());
             let (ok, verifier_output) = verify_qabase_open_full_two_layer_gkr(
                 &vp,
                 &comm,
@@ -2477,10 +2377,7 @@ mod test {
             )
             .unwrap();
             assert!(ok);
-            assert_eq!(
-                prover_output.query_indices,
-                verifier_output.query_indices,
-            );
+            assert_eq!(prover_output.query_indices, verifier_output.query_indices,);
         }
     }
 
@@ -2490,21 +2387,13 @@ mod test {
         let poly_size = 1usize << num_vars;
         let num_rows = 4usize;
         let mut rng = ChaCha8Rng::from_seed([81u8; 32]);
-        let param = setup::<Fr, Blake2s>(
-            poly_size,
-            1,
-            &mut rng,
-            Some(num_rows),
-            Some(2),
-            Some(4),
-        );
+        let param = setup::<Fr, Blake2s>(poly_size, 1, &mut rng, Some(num_rows), Some(2), Some(4));
         let (pp, _) = trim::<Fr, Blake2s>(&param, poly_size, 1);
         let word = random_matrix(num_rows, poly_size, &mut rng);
         let point = (0..(num_vars + 2))
             .map(|_| Fr::random(&mut rng))
             .collect::<Vec<_>>();
-        let (z_left, z_right) =
-            qabase_split_evaluation_point(&point, num_rows, num_vars);
+        let (z_left, z_right) = qabase_split_evaluation_point(&point, num_rows, num_vars);
 
         let mut transcript = TestTranscript::new(());
         let comm = commit_and_write(&pp, &word, &mut transcript);
@@ -2526,21 +2415,13 @@ mod test {
         let poly_size = 1usize << num_vars;
         let num_rows = 4usize;
         let mut rng = ChaCha8Rng::from_seed([91u8; 32]);
-        let param = setup::<Fr, Blake2s>(
-            poly_size,
-            1,
-            &mut rng,
-            Some(num_rows),
-            Some(2),
-            Some(4),
-        );
+        let param = setup::<Fr, Blake2s>(poly_size, 1, &mut rng, Some(num_rows), Some(2), Some(4));
         let (pp, vp) = trim::<Fr, Blake2s>(&param, poly_size, 1);
         let word = random_matrix(num_rows, poly_size, &mut rng);
         let point = (0..(num_vars + 2))
             .map(|_| Fr::random(&mut rng))
             .collect::<Vec<_>>();
-        let (z_left, z_right) =
-            qabase_split_evaluation_point(&point, num_rows, num_vars);
+        let (z_left, z_right) = qabase_split_evaluation_point(&point, num_rows, num_vars);
         let flat = word.iter().flatten().copied().collect::<Vec<_>>();
         let value = eval_mle_from_evals(&flat, &point);
 
@@ -2559,8 +2440,7 @@ mod test {
         let mut proof = prover_transcript.into_proof();
         proof[0] ^= 1;
 
-        let mut verifier_transcript =
-            TestTranscript::from_proof((), proof.as_slice());
+        let mut verifier_transcript = TestTranscript::from_proof((), proof.as_slice());
         let (ok, _) = verify_qabase_open_full_two_layer_gkr(
             &vp,
             &comm,

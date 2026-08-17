@@ -1,12 +1,11 @@
 #![allow(warnings, unused)]
 
 use crate::{
-    Error,
-    pcs::{Evaluation, Point, PolynomialCommitmentScheme},
     pcs::multilinear::{
-        Basefold, BasefoldCommitment, BasefoldExtParams, BasefoldParams,
-        BasefoldProverParams, BasefoldVerifierParams,
+        Basefold, BasefoldCommitment, BasefoldExtParams, BasefoldParams, BasefoldProverParams,
+        BasefoldVerifierParams,
     },
+    pcs::{Evaluation, Point, PolynomialCommitmentScheme},
     poly::multilinear::MultilinearPolynomial,
     util::{
         arithmetic::{Field, PrimeField},
@@ -14,6 +13,7 @@ use crate::{
         transcript::{TranscriptRead, TranscriptWrite},
         Deserialize, DeserializeOwned, Serialize,
     },
+    Error,
 };
 
 use core::fmt::Debug;
@@ -34,9 +34,8 @@ pub type CommitmentChunk<H> = Output<H>;
 
 const QABASE_BASEFOLD_RATE: usize = 1;
 
-
 /// QABase PCS prototype.
-/// 
+///
 /// The committed object is a matrix with `num_rows` rows and `2^num_vars`
 /// columns. Each row is encoded by the QA code
 ///
@@ -58,11 +57,9 @@ const QABASE_BASEFOLD_RATE: usize = 1;
 /// the full per-row `QAWitness`. The full witness is recomputed only for the
 /// single folded row during the opening protocol.
 
-
 // -----------------------------------------------------------------------------
 // Security parameter selection
 // -----------------------------------------------------------------------------
-
 
 /// Security configuration for choosing QABase Merkle consistency queries.
 ///
@@ -162,11 +159,7 @@ pub fn qabase_gp(delta: f64, field_bits: usize) -> f64 {
 
     let bits = field_bits as f64;
 
-    1.0
-        - delta
-        + (delta * delta.log2()
-            + (1.0 - delta) * (1.0 - delta).log2())
-            / bits
+    1.0 - delta + (delta * delta.log2() + (1.0 - delta) * (1.0 - delta).log2()) / bits
 }
 
 /// log2(2^a + 2^b), computed stably.
@@ -203,40 +196,30 @@ pub fn qabase_distance_failure_log2(
     let log_p = field_bits as f64;
     let log_p_minus_one = field_bits as f64;
 
-    let eps =
-        qabase_gp(delta, field_bits)
-            - (1.0 + log_n / log_p) / (c as f64);
+    let eps = qabase_gp(delta, field_bits) - (1.0 + log_n / log_p) / (c as f64);
 
     if eps <= 0.0 {
         return f64::INFINITY;
     }
 
-    let denom_log =
-        if log_p * (c as f64) * eps < 60.0 {
-            // log2(1 - p^{-c eps})
-            let x = log_p * (c as f64) * eps;
-            (-(-std::f64::consts::LN_2 * x).exp_m1()).log2()
-        } else {
-            0.0
-        };
+    let denom_log = if log_p * (c as f64) * eps < 60.0 {
+        // log2(1 - p^{-c eps})
+        let x = log_p * (c as f64) * eps;
+        (-(-std::f64::consts::LN_2 * x).exp_m1()).log2()
+    } else {
+        0.0
+    };
 
     // Bound 1:
     //
     //   c(c-1)N/(2p^2)
     //     + p^{-ceil((c-1)/(c delta)) c eps}
     //       / ((1 - p^{-c eps})(p - 1)).
-    let log_term1_a =
-        ((c * (c - 1)) as f64 / 2.0).log2()
-            + log_n
-            - 2.0 * log_p;
+    let log_term1_a = ((c * (c - 1)) as f64 / 2.0).log2() + log_n - 2.0 * log_p;
 
-    let threshold1 =
-        (((c - 1) as f64) / ((c as f64) * delta)).ceil();
+    let threshold1 = (((c - 1) as f64) / ((c as f64) * delta)).ceil();
 
-    let log_term1_b =
-        -log_p * threshold1 * (c as f64) * eps
-            - denom_log
-            - log_p_minus_one;
+    let log_term1_b = -log_p * threshold1 * (c as f64) * eps - denom_log - log_p_minus_one;
 
     let log_bound1 = log2_add(log_term1_a, log_term1_b);
 
@@ -245,22 +228,16 @@ pub fn qabase_distance_failure_log2(
     //   cN/p
     //     + p^{-ceil(1/delta) c eps}
     //       / ((1 - p^{-c eps})(p - 1)).
-    let log_term2_a =
-        (c as f64).log2() + log_n - log_p;
+    let log_term2_a = (c as f64).log2() + log_n - log_p;
 
     let threshold2 = (1.0 / delta).ceil();
 
-    let log_term2_b =
-        -log_p * threshold2 * (c as f64) * eps
-            - denom_log
-            - log_p_minus_one;
+    let log_term2_b = -log_p * threshold2 * (c as f64) * eps - denom_log - log_p_minus_one;
 
-    let log_bound2 = log2_add(log_term1_a, log_term1_b)
-        .min(log2_add(log_term2_a, log_term2_b));
+    let log_bound2 = log2_add(log_term1_a, log_term1_b).min(log2_add(log_term2_a, log_term2_b));
 
     log_bound1.min(log_bound2)
 }
-
 
 /// Find the largest delta such that the QA code distance failure probability
 /// is at most 2^{-failure_bits}.
@@ -278,12 +255,7 @@ pub fn qabase_distance_lower_bound(
     for _ in 0..100 {
         let mid = (lo + hi) * 0.5;
         let failure_log2 =
-            qabase_distance_failure_log2(
-                mid,
-                row_log_size,
-                inverse_rate,
-                field_bits,
-            );
+            qabase_distance_failure_log2(mid, row_log_size, inverse_rate, field_bits);
 
         if failure_log2 <= target_log2 {
             lo = mid;
@@ -344,9 +316,6 @@ where
     )
 }
 
-
-
-
 // -----------------------------------------------------------------------------
 // BaseFold configuration
 // -----------------------------------------------------------------------------
@@ -397,13 +366,23 @@ where
     F: PrimeField,
 {
     pub fn new_random(msg_len: usize, inverse_rate: usize, rng: &mut impl RngCore) -> Self {
-        assert!(msg_len.is_power_of_two(), "QA message length must be a power of two");
+        assert!(
+            msg_len.is_power_of_two(),
+            "QA message length must be a power of two"
+        );
         assert!(inverse_rate >= 2, "inverse_rate must be at least 2");
-        assert!(inverse_rate.is_power_of_two(), "inverse_rate must be a power of two");
+        assert!(
+            inverse_rate.is_power_of_two(),
+            "inverse_rate must be a power of two"
+        );
         // c = 2 , 4
 
         let e = (0..inverse_rate - 1)
-            .map(|_| (0..msg_len).map(|_| F::random(&mut *rng)).collect::<Vec<F>>())
+            .map(|_| {
+                (0..msg_len)
+                    .map(|_| F::random(&mut *rng))
+                    .collect::<Vec<F>>()
+            })
             .collect::<Vec<Vec<F>>>();
 
         Self { inverse_rate, e }
@@ -529,9 +508,17 @@ pub fn qa_encode_with_witness<F: PrimeField>(msg: &[F], params: &QAParams<F>) ->
     assert!(n.is_power_of_two(), "message length must be a power of two");
     assert!(rho >= 2, "inverse_rate must be at least 2");
     assert!(rho.is_power_of_two(), "inverse_rate must be a power of two");
-    assert_eq!(params.e.len(), rho - 1, "QA encoding needs rho - 1 coefficient vectors");
+    assert_eq!(
+        params.e.len(),
+        rho - 1,
+        "QA encoding needs rho - 1 coefficient vectors"
+    );
     for coeffs in &params.e {
-        assert_eq!(coeffs.len(), n, "each QA coefficient vector must have length msg.len()");
+        assert_eq!(
+            coeffs.len(),
+            n,
+            "each QA coefficient vector must have length msg.len()"
+        );
     }
 
     let mut msg_wht = msg.to_vec();
@@ -634,16 +621,12 @@ where
     codeword
 }
 
-
 /// Parallel full QA encoding for one large folded row.
 ///
 /// This is intended for opening, not row-wise commitment. During commitment we
 /// parallelize over rows; for the single folded row we instead parallelize the
 /// WHT and per-block scaling work.
-pub fn qa_encode_with_witness_parallel<F>(
-    msg: &[F],
-    params: &QAParams<F>,
-) -> QAWitness<F>
+pub fn qa_encode_with_witness_parallel<F>(msg: &[F], params: &QAParams<F>) -> QAWitness<F>
 where
     F: PrimeField + Send + Sync,
 {
@@ -772,14 +755,24 @@ where
     H: Hash,
     F: PrimeField,
 {
-    assert!(!codeword.is_empty(), "cannot Merkle-commit an empty codeword");
+    assert!(
+        !codeword.is_empty(),
+        "cannot Merkle-commit an empty codeword"
+    );
 
     let num_rows = codeword.len();
     let num_cols = codeword[0].len();
-    assert!(num_cols.is_power_of_two(), "Merkle leaf count must be a power of two");
+    assert!(
+        num_cols.is_power_of_two(),
+        "Merkle leaf count must be a power of two"
+    );
 
     for row in codeword {
-        assert_eq!(row.len(), num_cols, "all codeword rows must have the same length");
+        assert_eq!(
+            row.len(),
+            num_cols,
+            "all codeword rows must have the same length"
+        );
     }
 
     let leaves = (0..num_cols)
@@ -798,7 +791,10 @@ where
 
     while tree.last().unwrap().len() > 1 {
         let prev = tree.last().unwrap();
-        assert!(prev.len() % 2 == 0, "each Merkle layer must have even length");
+        assert!(
+            prev.len() % 2 == 0,
+            "each Merkle layer must have even length"
+        );
         let next = prev
             .par_chunks_exact(2)
             .map(|pair| hash_hash_pair::<H>(&pair[0], &pair[1]))
@@ -839,10 +835,17 @@ where
     H: Hash,
     F: PrimeField,
 {
-    assert!(num_leaves.is_power_of_two(), "number of Merkle leaves must be a power of two");
+    assert!(
+        num_leaves.is_power_of_two(),
+        "number of Merkle leaves must be a power of two"
+    );
     let depth = num_leaves.trailing_zeros() as usize;
     (0..depth)
-        .map(|_| transcript.read_commitment().expect("failed to read Merkle path node"))
+        .map(|_| {
+            transcript
+                .read_commitment()
+                .expect("failed to read Merkle path node")
+        })
         .collect::<Vec<_>>()
 }
 
@@ -1054,13 +1057,19 @@ where
     F: PrimeField + Serialize + DeserializeOwned,
     H: Hash,
 {
-    assert!(poly_size.is_power_of_two(), "poly_size must be a power of two");
+    assert!(
+        poly_size.is_power_of_two(),
+        "poly_size must be a power of two"
+    );
     type Pcs<F, H> = Basefold<F, H, QABaseFoldConfig>;
 
     let num_queries = num_queries.unwrap_or(504);
     let num_rows = num_rows.unwrap_or(64);
     let inverse_rate = inverse_rate.unwrap_or(2);
-    assert!(inverse_rate.is_power_of_two(), "inverse_rate must be a power of two");
+    assert!(
+        inverse_rate.is_power_of_two(),
+        "inverse_rate must be a power of two"
+    );
 
     let num_vars = poly_size.trailing_zeros() as usize;
     let mut rng = ChaCha8Rng::from_entropy();
@@ -1105,9 +1114,8 @@ where
         .collect::<Vec<_>>();
 
     let now = Instant::now();
-    let e_commitments =
-        Pcs::<F, H>::batch_commit(&basefold_pp, e_polys.iter())
-            .expect("failed to commit public QA coefficient polynomials E_i");
+    let e_commitments = Pcs::<F, H>::batch_commit(&basefold_pp, e_polys.iter())
+        .expect("failed to commit public QA coefficient polynomials E_i");
     println!(
         "qabase indexing public E commitments {:?}, blocks {}",
         now.elapsed(),
@@ -1136,7 +1144,6 @@ where
         },
     )
 }
-
 
 /// Commit to a matrix using row-wise QA encoding and a column Merkle tree.
 ///
@@ -1174,7 +1181,11 @@ where
 
     let now = Instant::now();
     let tree = merkelize_long::<H, F>(&codeword);
-    println!("degree {:?}, qa merkle time {:?}", pp.num_vars, now.elapsed());
+    println!(
+        "degree {:?}, qa merkle time {:?}",
+        pp.num_vars,
+        now.elapsed()
+    );
 
     transcript
         .write_commitment(&tree[tree.len() - 1][0])
@@ -1214,11 +1225,7 @@ fn log2_power_of_two(x: usize) -> usize {
 /// The Boolean encoding of `index` uses the same little-endian convention as
 /// `index_to_boolean_point`: bit `i` of `index` corresponds to coordinate
 /// `point[i]`.
-pub fn equality_mle_eval_at_index<F>(
-    index: usize,
-    num_vars: usize,
-    point: &[F],
-) -> F
+pub fn equality_mle_eval_at_index<F>(index: usize, num_vars: usize, point: &[F]) -> F
 where
     F: PrimeField,
 {
@@ -1227,10 +1234,7 @@ where
         num_vars,
         "point length does not match num_vars"
     );
-    assert!(
-        index < (1usize << num_vars),
-        "Boolean index out of range"
-    );
+    assert!(index < (1usize << num_vars), "Boolean index out of range");
 
     let mut acc = F::ONE;
     for i in 0..num_vars {
@@ -1251,7 +1255,11 @@ pub fn hadamard_tensor_mle_eval<F>(a: &[F], b: &[F]) -> F
 where
     F: PrimeField,
 {
-    assert_eq!(a.len(), b.len(), "Hadamard tensor MLE input lengths must match");
+    assert_eq!(
+        a.len(),
+        b.len(),
+        "Hadamard tensor MLE input lengths must match"
+    );
     let two = F::from(2u64);
     let mut acc = F::ONE;
     for (a_i, b_i) in a.iter().zip(b.iter()) {
@@ -1292,8 +1300,15 @@ pub fn eval_mle_from_evals<F>(evals: &[F], point: &[F]) -> F
 where
     F: PrimeField,
 {
-    assert!(evals.len().is_power_of_two(), "MLE eval vector length must be a power of two");
-    assert_eq!(evals.len(), 1usize << point.len(), "point length does not match eval length");
+    assert!(
+        evals.len().is_power_of_two(),
+        "MLE eval vector length must be a power of two"
+    );
+    assert_eq!(
+        evals.len(),
+        1usize << point.len(),
+        "point length does not match eval length"
+    );
 
     let mut layer = evals.to_vec();
     let mut size = layer.len();
@@ -1313,7 +1328,11 @@ pub fn equality_mle_eval<F>(a: &[F], b: &[F]) -> F
 where
     F: PrimeField,
 {
-    assert_eq!(a.len(), b.len(), "equality polynomial input lengths must match");
+    assert_eq!(
+        a.len(),
+        b.len(),
+        "equality polynomial input lengths must match"
+    );
     let mut acc = F::ONE;
     for (a_i, b_i) in a.iter().zip(b.iter()) {
         acc *= (F::ONE - *a_i) * (F::ONE - *b_i) + (*a_i) * (*b_i);
@@ -1351,10 +1370,17 @@ pub fn batched_linear_combination_evals<F>(blocks: &[Vec<F>], alpha: F) -> Vec<F
 where
     F: PrimeField,
 {
-    assert!(!blocks.is_empty(), "cannot batch an empty list of evaluation vectors");
+    assert!(
+        !blocks.is_empty(),
+        "cannot batch an empty list of evaluation vectors"
+    );
     let n = blocks[0].len();
     for block in blocks {
-        assert_eq!(block.len(), n, "all batched eval vectors must have same length");
+        assert_eq!(
+            block.len(),
+            n,
+            "all batched eval vectors must have same length"
+        );
     }
 
     let mut out = vec![F::ZERO; n];
@@ -1374,7 +1400,13 @@ where
 {
     assert!(index < (1usize << num_vars), "Boolean index out of range");
     (0..num_vars)
-        .map(|i| if ((index >> i) & 1) == 1 { F::ONE } else { F::ZERO })
+        .map(|i| {
+            if ((index >> i) & 1) == 1 {
+                F::ONE
+            } else {
+                F::ZERO
+            }
+        })
         .collect::<Vec<_>>()
 }
 
@@ -1385,7 +1417,10 @@ pub fn qabase_codeword_column_to_block(
 ) -> (usize, usize) {
     assert!(block_len > 0, "block length must be positive");
     let num_cols = inverse_rate * block_len;
-    assert!(full_index < num_cols, "QA codeword column index out of range");
+    assert!(
+        full_index < num_cols,
+        "QA codeword column index out of range"
+    );
     let block_index = full_index / block_len;
     let local_index = full_index % block_len;
     assert!(block_index < inverse_rate, "QA block index out of range");
@@ -1396,14 +1431,17 @@ pub fn fold_opened_column<F>(opened_column: &[F], row_challenges: &[F]) -> F
 where
     F: PrimeField,
 {
-    assert_eq!(opened_column.len(), row_challenges.len(), "opened column length mismatch");
+    assert_eq!(
+        opened_column.len(),
+        row_challenges.len(),
+        "opened column length mismatch"
+    );
     let mut acc = F::ZERO;
     for (value, challenge) in opened_column.iter().zip(row_challenges.iter()) {
         acc += *challenge * *value;
     }
     acc
 }
-
 
 //////////////////////////////////////////////////////////////////////////////
 // Folded witness and auxiliary BaseFold commitments
@@ -1456,7 +1494,11 @@ where
     F: PrimeField,
 {
     assert!(!rows.is_empty(), "cannot fold an empty matrix");
-    assert_eq!(rows.len(), challenges.len(), "number of row challenges must match rows");
+    assert_eq!(
+        rows.len(),
+        challenges.len(),
+        "number of row challenges must match rows"
+    );
 
     let row_len = rows[0].len();
     for row in rows {
@@ -1488,11 +1530,7 @@ where
 
     let row_len = rows[0].len();
     for row in rows {
-        assert_eq!(
-            row.len(),
-            row_len,
-            "all rows must have the same length"
-        );
+        assert_eq!(row.len(), row_len, "all rows must have the same length");
     }
 
     (0..row_len)
@@ -1511,7 +1549,10 @@ fn vec_to_mle<F>(evals: Vec<F>) -> MultilinearPolynomial<F>
 where
     F: PrimeField,
 {
-    assert!(evals.len().is_power_of_two(), "MLE evaluation length must be a power of two");
+    assert!(
+        evals.len().is_power_of_two(),
+        "MLE evaluation length must be a power of two"
+    );
     MultilinearPolynomial::new(evals)
 }
 
@@ -1549,8 +1590,7 @@ where
 
     let folded_msg = linear_combine_rows_parallel(rows, &row_challenges);
 
-    let folded_qa_witness =
-        qa_encode_with_witness_parallel(&folded_msg, &pp.qa_params);
+    let folded_qa_witness = qa_encode_with_witness_parallel(&folded_msg, &pp.qa_params);
 
     QABaseFoldedWitness {
         row_challenges,
@@ -1576,13 +1616,18 @@ where
 
     let now = Instant::now();
     let row_challenges = transcript.squeeze_challenges(pp.num_rows);
-    let folded_witness =
-        build_folded_qa_witness_from_rows::<F, H>(pp, rows, row_challenges);
+    let folded_witness = build_folded_qa_witness_from_rows::<F, H>(pp, rows, row_challenges);
     println!("qabase folded witness construction {:?}", now.elapsed());
 
     let rho = pp.inverse_rate;
-    assert_eq!(folded_witness.folded_qa_witness.parity_blocks.len(), rho - 1);
-    assert_eq!(folded_witness.folded_qa_witness.scaled_wht_blocks.len(), rho - 1);
+    assert_eq!(
+        folded_witness.folded_qa_witness.parity_blocks.len(),
+        rho - 1
+    );
+    assert_eq!(
+        folded_witness.folded_qa_witness.scaled_wht_blocks.len(),
+        rho - 1
+    );
 
     // Construct auxiliary BaseFold polynomials exactly once.
     //
@@ -1647,7 +1692,10 @@ where
 
     let root_from_transcript = transcript.read_commitment()?;
     let committed_root = <QABaseCommitment<F, H> as AsRef<Output<H>>>::as_ref(comm);
-    assert!(&root_from_transcript == committed_root, "QABase root mismatch");
+    assert!(
+        &root_from_transcript == committed_root,
+        "QABase root mismatch"
+    );
 
     let row_challenges = transcript.squeeze_challenges(vp.num_rows);
 
@@ -1656,11 +1704,8 @@ where
     // vector-leaf batch root.  Read them as one batch to preserve the batch_root
     // metadata used by BaseFold::batch_verify.
     let rho = vp.inverse_rate;
-    let aux_commitments_all = Pcs::<F, H>::read_commitments(
-        &vp.basefold_verifier_param,
-        2 * rho,
-        transcript,
-    )?;
+    let aux_commitments_all =
+        Pcs::<F, H>::read_commitments(&vp.basefold_verifier_param, 2 * rho, transcript)?;
     assert_eq!(aux_commitments_all.len(), 2 * rho);
 
     let u_block_commitments = aux_commitments_all[0..rho].to_vec();
@@ -1717,10 +1762,17 @@ where
     F: PrimeField + Serialize + DeserializeOwned,
     H: Hash,
 {
-    assert!(v_prime_evals.len().is_power_of_two(), "v_prime length must be a power of two");
+    assert!(
+        v_prime_evals.len().is_power_of_two(),
+        "v_prime length must be a power of two"
+    );
     let n = v_prime_evals.len();
     let num_vars = n.trailing_zeros() as usize;
-    assert_eq!(qa_params.e.len(), u_prime_evals.len(), "number of E_i vectors mismatch");
+    assert_eq!(
+        qa_params.e.len(),
+        u_prime_evals.len(),
+        "number of E_i vectors mismatch"
+    );
 
     for e_i in &qa_params.e {
         assert_eq!(e_i.len(), n, "each E_i must have length n");
@@ -1735,14 +1787,11 @@ where
     let alpha = transcript.squeeze_challenges(1)[0];
     let beta = transcript.squeeze_challenges(num_vars);
 
-    let eq_beta_poly =
-        MultilinearPolynomial::new(equality_mle_evals_on_hypercube::<F>(&beta));
+    let eq_beta_poly = MultilinearPolynomial::new(equality_mle_evals_on_hypercube::<F>(&beta));
 
-    let u_prime_batch_evals =
-        batched_linear_combination_evals::<F>(u_prime_evals, alpha);
+    let u_prime_batch_evals = batched_linear_combination_evals::<F>(u_prime_evals, alpha);
 
-    let e_batch_evals =
-        batched_linear_combination_evals::<F>(&qa_params.e, alpha);
+    let e_batch_evals = batched_linear_combination_evals::<F>(&qa_params.e, alpha);
 
     let u_prime_batch_poly = MultilinearPolynomial::new(u_prime_batch_evals);
     let e_batch_poly = MultilinearPolynomial::new(e_batch_evals.clone());
@@ -1753,8 +1802,7 @@ where
     let e_batch_query = Expression::<F>::Polynomial(Query::new(2, Rotation::cur()));
     let v_prime_query = Expression::<F>::Polynomial(Query::new(3, Rotation::cur()));
 
-    let expression: Expression<F> =
-        eq_query * (u_batch_query - e_batch_query * v_prime_query);
+    let expression: Expression<F> = eq_query * (u_batch_query - e_batch_query * v_prime_query);
 
     let polys = vec![eq_beta_poly, u_prime_batch_poly, e_batch_poly, v_prime_poly];
     let challenges: Vec<F> = Vec::new();
@@ -1794,10 +1842,8 @@ where
 
     assert_eq!(e_batch_check, e_batch_eval_at_sc_point);
 
-    let terminal_eval =
-        eq_eval_at_sc_point
-            * (u_prime_batch_eval_at_sc_point
-                - e_batch_eval_at_sc_point * v_prime_eval_at_sc_point);
+    let terminal_eval = eq_eval_at_sc_point
+        * (u_prime_batch_eval_at_sc_point - e_batch_eval_at_sc_point * v_prime_eval_at_sc_point);
 
     println!("qabase scaling relation sumcheck prove {:?}", now.elapsed());
 
@@ -1837,8 +1883,7 @@ where
     let alpha = transcript.squeeze_challenges(1)[0];
     let beta = transcript.squeeze_challenges(num_vars);
 
-    let (terminal_eval, sc_point) =
-        Sc::<F>::verify(&(), num_vars, 3usize, F::ZERO, transcript)?;
+    let (terminal_eval, sc_point) = Sc::<F>::verify(&(), num_vars, 3usize, F::ZERO, transcript)?;
 
     let v_prime_eval_at_sc_point = transcript.read_field_element()?;
     let u_prime_batch_eval_at_sc_point = transcript.read_field_element()?;
@@ -1860,14 +1905,15 @@ where
 
     let eq_eval_at_sc_point = equality_mle_eval::<F>(&beta, &sc_point);
 
-    let expected_terminal =
-        eq_eval_at_sc_point
-            * (u_prime_batch_eval_at_sc_point
-                - e_batch_eval_at_sc_point * v_prime_eval_at_sc_point);
+    let expected_terminal = eq_eval_at_sc_point
+        * (u_prime_batch_eval_at_sc_point - e_batch_eval_at_sc_point * v_prime_eval_at_sc_point);
 
     let ok = terminal_eval == expected_terminal;
 
-    println!("qabase scaling relation sumcheck verify {:?}", now.elapsed());
+    println!(
+        "qabase scaling relation sumcheck verify {:?}",
+        now.elapsed()
+    );
 
     Ok((
         ok,
@@ -1918,12 +1964,22 @@ where
     F: PrimeField + Serialize + DeserializeOwned,
     H: Hash,
 {
-    assert!(!input_evals_list.is_empty(), "batched WHT proof needs at least one relation");
-    assert_eq!(input_evals_list.len(), output_evals_list.len(), "WHT input/output count mismatch");
+    assert!(
+        !input_evals_list.is_empty(),
+        "batched WHT proof needs at least one relation"
+    );
+    assert_eq!(
+        input_evals_list.len(),
+        output_evals_list.len(),
+        "WHT input/output count mismatch"
+    );
 
     let num_relations = input_evals_list.len();
     let n = input_evals_list[0].len();
-    assert!(n.is_power_of_two(), "WHT input length must be a power of two");
+    assert!(
+        n.is_power_of_two(),
+        "WHT input length must be a power of two"
+    );
     let num_vars = n.trailing_zeros() as usize;
     for input in input_evals_list {
         assert_eq!(input.len(), n, "all WHT inputs must have same length");
@@ -1974,9 +2030,11 @@ where
 
     let challenges: Vec<F> = Vec::new();
     let ys: Vec<Vec<F>> = Vec::new();
-    let virtual_poly: VirtualPolynomial<F> = VirtualPolynomial::new(&expression, &polys, &challenges, &ys);
+    let virtual_poly: VirtualPolynomial<F> =
+        VirtualPolynomial::new(&expression, &polys, &challenges, &ys);
 
-    let (sc_point, terminal_evals) = Sc::<F>::prove(&(), num_vars, virtual_poly, claimed_sum, transcript)?;
+    let (sc_point, terminal_evals) =
+        Sc::<F>::prove(&(), num_vars, virtual_poly, claimed_sum, transcript)?;
     assert_eq!(terminal_evals.len(), 2 * num_relations);
 
     let mut scaled_h_evals_at_sc_point = Vec::with_capacity(num_relations);
@@ -1994,7 +2052,11 @@ where
         transcript.write_field_element(value)?;
     }
 
-    println!("qabase batched WHT relations sumcheck prove {:?}, relations {:?}", now.elapsed(), num_relations);
+    println!(
+        "qabase batched WHT relations sumcheck prove {:?}, relations {:?}",
+        now.elapsed(),
+        num_relations
+    );
 
     Ok(QABaseBatchedWhtRelationProof {
         eta,
@@ -2017,7 +2079,10 @@ where
     F: PrimeField + Serialize + DeserializeOwned,
     H: Hash,
 {
-    assert!(num_relations >= 1, "batched WHT verifier needs at least one relation");
+    assert!(
+        num_relations >= 1,
+        "batched WHT verifier needs at least one relation"
+    );
     type Sc<F> = ClassicSumCheck<EvaluationsProver<F>>;
 
     let now = Instant::now();
@@ -2037,7 +2102,8 @@ where
         eta_power *= eta;
     }
 
-    let (terminal_eval, sc_point) = Sc::<F>::verify(&(), num_vars, 2usize, claimed_sum, transcript)?;
+    let (terminal_eval, sc_point) =
+        Sc::<F>::verify(&(), num_vars, 2usize, claimed_sum, transcript)?;
 
     let mut input_evals_at_sc_point = Vec::with_capacity(num_relations);
     for _ in 0..num_relations {
@@ -2055,7 +2121,11 @@ where
     }
     let ok = terminal_eval == expected_terminal;
 
-    println!("qabase batched WHT relations sumcheck verify {:?}, relations {:?}", now.elapsed(), num_relations);
+    println!(
+        "qabase batched WHT relations sumcheck verify {:?}, relations {:?}",
+        now.elapsed(),
+        num_relations
+    );
 
     Ok((
         ok,
@@ -2121,7 +2191,8 @@ where
         wht_outputs.push(witness.parity_blocks[i].clone());
     }
 
-    let batched_wht = prove_batched_wht_relations_sumcheck::<F, H>(&wht_inputs, &wht_outputs, transcript)?;
+    let batched_wht =
+        prove_batched_wht_relations_sumcheck::<F, H>(&wht_inputs, &wht_outputs, transcript)?;
     let scaling = prove_scaling_relation_sumcheck::<F, H>(
         qa_params,
         &witness.msg_wht,
@@ -2129,9 +2200,15 @@ where
         transcript,
     )?;
 
-    println!("qabase batched-WHT encoding relations prove {:?}", now.elapsed());
+    println!(
+        "qabase batched-WHT encoding relations prove {:?}",
+        now.elapsed()
+    );
 
-    Ok(QABaseEncodingRelationsBatchedWhtProof { batched_wht, scaling })
+    Ok(QABaseEncodingRelationsBatchedWhtProof {
+        batched_wht,
+        scaling,
+    })
 }
 
 pub fn verify_qabase_encoding_relations_batched_wht_sumcheck<F, H>(
@@ -2143,9 +2220,15 @@ where
     H: Hash,
 {
     let now = Instant::now();
-    assert!(!qa_params.e.is_empty(), "QAParams must contain at least one coefficient vector");
+    assert!(
+        !qa_params.e.is_empty(),
+        "QAParams must contain at least one coefficient vector"
+    );
     let n = qa_params.e[0].len();
-    assert!(n.is_power_of_two(), "QA coefficient vector length must be a power of two");
+    assert!(
+        n.is_power_of_two(),
+        "QA coefficient vector length must be a power of two"
+    );
     let num_vars = n.trailing_zeros() as usize;
     let rho = qa_params.inverse_rate;
     assert_eq!(qa_params.e.len(), rho - 1);
@@ -2155,9 +2238,18 @@ where
     let (ok_scaling, scaling) = verify_scaling_relation_sumcheck::<F, H>(qa_params, transcript)?;
     let ok = ok_wht && ok_scaling;
 
-    println!("qabase batched-WHT encoding relations verify {:?}", now.elapsed());
+    println!(
+        "qabase batched-WHT encoding relations verify {:?}",
+        now.elapsed()
+    );
 
-    Ok((ok, QABaseEncodingRelationsBatchedWhtProof { batched_wht, scaling }))
+    Ok((
+        ok,
+        QABaseEncodingRelationsBatchedWhtProof {
+            batched_wht,
+            scaling,
+        },
+    ))
 }
 
 // -----------------------------------------------------------------------------
@@ -2416,10 +2508,7 @@ where
 /// Compute the right-hand side of the Item 1 selector-sumcheck:
 ///
 ///   sum_j tau^j * <row_challenges, C(:, query_indices[j])>.
-pub fn qabase_weighted_folded_sum<F>(
-    folded_values: &[F],
-    tau: F,
-) -> F
+pub fn qabase_weighted_folded_sum<F>(folded_values: &[F], tau: F) -> F
 where
     F: PrimeField,
 {
@@ -2467,7 +2556,6 @@ where
 
     acc
 }
-
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound(serialize = "F: Serialize", deserialize = "F: DeserializeOwned"))]
@@ -2577,7 +2665,11 @@ where
         "committed row count mismatch"
     );
     for row in &comm.codeword {
-        assert_eq!(row.len(), num_cols, "committed codeword row length mismatch");
+        assert_eq!(
+            row.len(),
+            num_cols,
+            "committed codeword row length mismatch"
+        );
     }
     assert_eq!(
         folded_witness.folded_qa_witness.codeword.len(),
@@ -2609,8 +2701,7 @@ where
             transcript.write_field_element(value)?;
         }
 
-        let folded_value =
-            fold_opened_column::<F>(&opened_column, &folded_witness.row_challenges);
+        let folded_value = fold_opened_column::<F>(&opened_column, &folded_witness.row_challenges);
 
         folded_values.push(folded_value);
         opened_columns.push(opened_column);
@@ -2631,8 +2722,7 @@ where
     //   sum_x h(x) u(x) = sum_j tau^j * <r, C(:, query_indices[j])>.
     //
     // The right-hand side is `claimed_sum`.
-    let selector_evals =
-        qabase_selector_evals_from_queries::<F>(num_cols, &query_indices, tau);
+    let selector_evals = qabase_selector_evals_from_queries::<F>(num_cols, &query_indices, tau);
 
     let u_full_evals = folded_witness.folded_qa_witness.codeword.clone();
 
@@ -2647,8 +2737,7 @@ where
     let challenges: Vec<F> = Vec::new();
     let ys: Vec<Vec<F>> = Vec::new();
 
-    let virtual_poly =
-        VirtualPolynomial::new(&expression, &polys, &challenges, &ys);
+    let virtual_poly = VirtualPolynomial::new(&expression, &polys, &challenges, &ys);
 
     let (sc_point, terminal_evals) =
         Sc::<F>::prove(&(), total_vars, virtual_poly, claimed_sum, transcript)?;
@@ -2657,12 +2746,8 @@ where
     let selector_eval_at_sc_point = terminal_evals[0];
     let u_eval_at_sc_point = terminal_evals[1];
 
-    let selector_eval_check = qabase_selector_eval_from_queries::<F>(
-        num_cols,
-        &query_indices,
-        tau,
-        &sc_point,
-    );
+    let selector_eval_check =
+        qabase_selector_eval_from_queries::<F>(num_cols, &query_indices, tau, &sc_point);
     assert!(
         selector_eval_check == selector_eval_at_sc_point,
         "selector terminal evaluation mismatch"
@@ -2698,8 +2783,7 @@ where
         transcript.write_field_element(&value)?;
         u_block_evals_at_sc_point.push(value);
 
-        let block_weight =
-            equality_mle_eval_at_index::<F>(block_index, log_rho, &block_point);
+        let block_weight = equality_mle_eval_at_index::<F>(block_index, log_rho, &block_point);
         recomposed_u_eval += block_weight * value;
 
         push_basefold_opening_claim::<F>(
@@ -2828,15 +2912,10 @@ where
 
     let u_eval_at_sc_point = transcript.read_field_element()?;
 
-    let selector_eval_at_sc_point = qabase_selector_eval_from_queries::<F>(
-        num_cols,
-        &query_indices,
-        tau,
-        &sc_point,
-    );
+    let selector_eval_at_sc_point =
+        qabase_selector_eval_from_queries::<F>(num_cols, &query_indices, tau, &sc_point);
 
-    let ok_sumcheck =
-        terminal_eval == selector_eval_at_sc_point * u_eval_at_sc_point;
+    let ok_sumcheck = terminal_eval == selector_eval_at_sc_point * u_eval_at_sc_point;
 
     // 5. Verify that u(sc_point) is reconstructed from the c block commitments.
     let local_point = sc_point[..vp.num_vars].to_vec();
@@ -2849,8 +2928,7 @@ where
         let value = transcript.read_field_element()?;
         u_block_evals_at_sc_point.push(value);
 
-        let block_weight =
-            equality_mle_eval_at_index::<F>(block_index, log_rho, &block_point);
+        let block_weight = equality_mle_eval_at_index::<F>(block_index, log_rho, &block_point);
         recomposed_u_eval += block_weight * value;
 
         push_basefold_opening_claim::<F>(
@@ -2986,7 +3064,7 @@ where
             value,
         );
     }
-    
+
     assert_eq!(u_prime_batch_check, scaling.u_prime_batch_eval_at_sc_point);
 
     // Public E_i openings used by the scaling terminal check.
@@ -3093,7 +3171,7 @@ where
             value,
         );
     }
-    
+
     assert_eq!(u_prime_batch_check, scaling.u_prime_batch_eval_at_sc_point);
 
     // Public E_i openings used by the scaling terminal check.
@@ -3121,7 +3199,6 @@ where
 
     Ok(())
 }
-
 
 // -----------------------------------------------------------------------------
 // Evaluation check
@@ -3175,14 +3252,14 @@ where
 ///
 /// These weights are used to fold the committed matrix rows according to the
 /// left part of the evaluation point.
-pub fn qabase_row_weights_from_z_left<F>(
-    num_rows: usize,
-    z_left: &[F],
-) -> Vec<F>
+pub fn qabase_row_weights_from_z_left<F>(num_rows: usize, z_left: &[F]) -> Vec<F>
 where
     F: PrimeField,
 {
-    assert!(num_rows.is_power_of_two(), "num_rows must be a power of two");
+    assert!(
+        num_rows.is_power_of_two(),
+        "num_rows must be a power of two"
+    );
 
     let log_rows = log2_power_of_two(num_rows);
 
@@ -3251,10 +3328,7 @@ where
     let rho = inverse_rate;
 
     assert_eq!(witness.eval_qa_witness.parity_blocks.len(), rho - 1);
-    assert_eq!(
-        witness.eval_qa_witness.scaled_wht_blocks.len(),
-        rho - 1
-    );
+    assert_eq!(witness.eval_qa_witness.scaled_wht_blocks.len(), rho - 1);
 
     let mut polys = Vec::with_capacity(2 * rho);
 
@@ -3296,15 +3370,13 @@ where
 
     let now = Instant::now();
 
-    let eval_witness =
-        build_eval_qa_witness_from_rows::<F, H>(pp, rows, z_left);
+    let eval_witness = build_eval_qa_witness_from_rows::<F, H>(pp, rows, z_left);
 
     println!("qabase eval witness construction {:?}", now.elapsed());
 
     let rho = pp.inverse_rate;
 
-    let aux_polys =
-        build_aux_polys_from_eval_witness::<F>(&eval_witness, rho);
+    let aux_polys = build_aux_polys_from_eval_witness::<F>(&eval_witness, rho);
 
     assert_eq!(aux_polys.len(), 2 * rho);
 
@@ -3359,11 +3431,8 @@ where
 
     let rho = vp.inverse_rate;
 
-    let aux_commitments_all = Pcs::<F, H>::read_commitments(
-        &vp.basefold_verifier_param,
-        2 * rho,
-        transcript,
-    )?;
+    let aux_commitments_all =
+        Pcs::<F, H>::read_commitments(&vp.basefold_verifier_param, 2 * rho, transcript)?;
 
     assert_eq!(aux_commitments_all.len(), 2 * rho);
 
@@ -3403,10 +3472,7 @@ pub struct QABaseEvalAuxLayout {
 }
 
 #[inline]
-fn eval_poly_index_q_block(
-    layout: QABaseEvalAuxLayout,
-    block_index: usize,
-) -> usize {
+fn eval_poly_index_q_block(layout: QABaseEvalAuxLayout, block_index: usize) -> usize {
     assert!(block_index < layout.rho, "q block index out of range");
     layout.q_aux_start + block_index
 }
@@ -3417,19 +3483,13 @@ fn eval_poly_index_q_v_prime(layout: QABaseEvalAuxLayout) -> usize {
 }
 
 #[inline]
-fn eval_poly_index_q_u_prime(
-    layout: QABaseEvalAuxLayout,
-    i: usize,
-) -> usize {
+fn eval_poly_index_q_u_prime(layout: QABaseEvalAuxLayout, i: usize) -> usize {
     assert!(i + 1 < layout.rho, "q_u_prime index out of range");
     layout.q_aux_start + layout.rho + 1 + i
 }
 
 #[inline]
-fn eval_poly_index_e(
-    layout: QABaseEvalAuxLayout,
-    i: usize,
-) -> usize {
+fn eval_poly_index_e(layout: QABaseEvalAuxLayout, i: usize) -> usize {
     assert!(i + 1 < layout.rho, "E_i index out of range");
     layout.e_start + i
 }
@@ -3453,10 +3513,7 @@ where
     let rho = eval_aux_data.commitments.u_block_commitments.len();
 
     assert_eq!(eval_aux_data.polys.len(), 2 * rho);
-    assert_eq!(
-        eval_aux_data.commitments.u_prime_commitments.len(),
-        rho - 1
-    );
+    assert_eq!(eval_aux_data.commitments.u_prime_commitments.len(), rho - 1);
     assert_eq!(acc.polys.len(), acc.comms.len());
 
     let e_start = 2 * rho;
@@ -3502,10 +3559,7 @@ where
 {
     let rho = eval_aux_commitments.u_block_commitments.len();
 
-    assert_eq!(
-        eval_aux_commitments.u_prime_commitments.len(),
-        rho - 1
-    );
+    assert_eq!(eval_aux_commitments.u_prime_commitments.len(), rho - 1);
 
     let e_start = 2 * rho;
 
@@ -3516,8 +3570,7 @@ where
 
     let q_aux_start = acc.comms.len();
 
-    let q_aux_commitment_refs =
-        flatten_aux_commitment_refs::<F, H>(eval_aux_commitments, rho);
+    let q_aux_commitment_refs = flatten_aux_commitment_refs::<F, H>(eval_aux_commitments, rho);
 
     acc.comms.extend(q_aux_commitment_refs);
 
@@ -3753,8 +3806,7 @@ where
         );
     }
 
-    let ok_q_batch =
-        q_u_prime_batch_check == scaling.u_prime_batch_eval_at_sc_point;
+    let ok_q_batch = q_u_prime_batch_check == scaling.u_prime_batch_eval_at_sc_point;
 
     assert_eq!(scaling.e_evals_at_sc_point.len(), rho - 1);
 
@@ -3880,9 +3932,7 @@ where
 {
     opened_columns
         .iter()
-        .map(|opened_column| {
-            fold_opened_column::<F>(opened_column, row_weights)
-        })
+        .map(|opened_column| fold_opened_column::<F>(opened_column, row_weights))
         .collect::<Vec<_>>()
 }
 
@@ -3930,11 +3980,9 @@ where
         "evaluation QA codeword length mismatch"
     );
 
-    let claimed_sum =
-        qabase_weighted_folded_sum::<F>(eval_folded_values, tau);
+    let claimed_sum = qabase_weighted_folded_sum::<F>(eval_folded_values, tau);
 
-    let selector_evals =
-        qabase_selector_evals_from_queries::<F>(num_cols, query_indices, tau);
+    let selector_evals = qabase_selector_evals_from_queries::<F>(num_cols, query_indices, tau);
 
     let q_full_evals = eval_witness.eval_qa_witness.codeword.clone();
 
@@ -3950,8 +3998,7 @@ where
     let challenges: Vec<F> = Vec::new();
     let ys: Vec<Vec<F>> = Vec::new();
 
-    let virtual_poly =
-        VirtualPolynomial::new(&expression, &polys, &challenges, &ys);
+    let virtual_poly = VirtualPolynomial::new(&expression, &polys, &challenges, &ys);
 
     let (sc_point, terminal_evals) =
         Sc::<F>::prove(&(), total_vars, virtual_poly, claimed_sum, transcript)?;
@@ -3961,16 +4008,11 @@ where
     let selector_eval_at_sc_point = terminal_evals[0];
     let q_eval_at_sc_point = terminal_evals[1];
 
-    let selector_eval_check = qabase_selector_eval_from_queries::<F>(
-        num_cols,
-        query_indices,
-        tau,
-        &sc_point,
-    );
+    let selector_eval_check =
+        qabase_selector_eval_from_queries::<F>(num_cols, query_indices, tau, &sc_point);
 
     assert_eq!(
-        selector_eval_check,
-        selector_eval_at_sc_point,
+        selector_eval_check, selector_eval_at_sc_point,
         "evaluation selector terminal evaluation mismatch"
     );
 
@@ -3997,8 +4039,7 @@ where
 
         q_block_evals_at_sc_point.push(value);
 
-        let block_weight =
-            equality_mle_eval_at_index::<F>(block_index, log_rho, &block_point);
+        let block_weight = equality_mle_eval_at_index::<F>(block_index, log_rho, &block_point);
 
         recomposed_q_eval += block_weight * value;
 
@@ -4012,8 +4053,7 @@ where
     }
 
     assert_eq!(
-        recomposed_q_eval,
-        q_eval_at_sc_point,
+        recomposed_q_eval, q_eval_at_sc_point,
         "block decomposition of q(sc_point) failed"
     );
 
@@ -4073,23 +4113,17 @@ where
     );
     assert_eq!(query_indices.len(), eval_folded_values.len());
 
-    let claimed_sum =
-        qabase_weighted_folded_sum::<F>(eval_folded_values, tau);
+    let claimed_sum = qabase_weighted_folded_sum::<F>(eval_folded_values, tau);
 
     let (terminal_eval, sc_point) =
         Sc::<F>::verify(&(), total_vars, 2usize, claimed_sum, transcript)?;
 
     let q_eval_at_sc_point = transcript.read_field_element()?;
 
-    let selector_eval_at_sc_point = qabase_selector_eval_from_queries::<F>(
-        num_cols,
-        query_indices,
-        tau,
-        &sc_point,
-    );
+    let selector_eval_at_sc_point =
+        qabase_selector_eval_from_queries::<F>(num_cols, query_indices, tau, &sc_point);
 
-    let ok_sumcheck =
-        terminal_eval == selector_eval_at_sc_point * q_eval_at_sc_point;
+    let ok_sumcheck = terminal_eval == selector_eval_at_sc_point * q_eval_at_sc_point;
 
     let local_point = sc_point[..vp.num_vars].to_vec();
     let block_point = sc_point[vp.num_vars..].to_vec();
@@ -4102,8 +4136,7 @@ where
 
         q_block_evals_at_sc_point.push(value);
 
-        let block_weight =
-            equality_mle_eval_at_index::<F>(block_index, log_rho, &block_point);
+        let block_weight = equality_mle_eval_at_index::<F>(block_index, log_rho, &block_point);
 
         recomposed_q_eval += block_weight * value;
 
@@ -4180,8 +4213,7 @@ where
         "z_right length must match row polynomial dimension"
     );
 
-    let actual_value =
-        eval_mle_from_evals::<F>(&eval_witness.eval_msg, z_right);
+    let actual_value = eval_mle_from_evals::<F>(&eval_witness.eval_msg, z_right);
 
     let ok = actual_value == claimed_value;
 
@@ -4257,10 +4289,7 @@ where
     F: PrimeField + Serialize + DeserializeOwned,
     H: Hash,
 {
-    verify_qabase_encoding_relations_batched_wht_sumcheck::<F, H>(
-        &vp.qa_params,
-        transcript,
-    )
+    verify_qabase_encoding_relations_batched_wht_sumcheck::<F, H>(&vp.qa_params, transcript)
 }
 
 // -----------------------------------------------------------------------------
@@ -4295,7 +4324,10 @@ pub fn qabase_split_evaluation_point<F>(
 where
     F: PrimeField,
 {
-    assert!(num_rows.is_power_of_two(), "num_rows must be a power of two");
+    assert!(
+        num_rows.is_power_of_two(),
+        "num_rows must be a power of two"
+    );
 
     let log_rows = log2_power_of_two(num_rows);
 
@@ -4344,7 +4376,6 @@ where
     pub encoding_relations: QABaseEncodingRelationsBatchedWhtProof<F>,
     pub item1: QABaseItem1VerifierOutput<F>,
 }
-
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound(serialize = "F: Serialize", deserialize = "F: DeserializeOwned"))]
@@ -4414,10 +4445,7 @@ where
     let (folded_witness, aux_data) =
         commit_folded_witness_with_basefold::<F, H>(pp, word, transcript)?;
 
-    let mut opening_acc = build_qabase_prover_opening_accumulator::<F, H>(
-        &aux_data,
-        pp,
-    );
+    let mut opening_acc = build_qabase_prover_opening_accumulator::<F, H>(&aux_data, pp);
 
     let encoding_relations = prove_qabase_encoding_relations_batched_wht_sumcheck::<F, H>(
         &pp.qa_params,
@@ -4493,8 +4521,7 @@ where
     let (row_challenges, aux_commitments) =
         read_aux_commitments_from_transcript::<F, H>(vp, comm, transcript)?;
 
-    let mut opening_acc =
-        build_qabase_verifier_opening_accumulator::<F, H>(vp, &aux_commitments);
+    let mut opening_acc = build_qabase_verifier_opening_accumulator::<F, H>(vp, &aux_commitments);
 
     let (ok_encoding, encoding_relations) =
         verify_qabase_encoding_relations_batched_wht_sumcheck::<F, H>(&vp.qa_params, transcript)?;
@@ -4547,9 +4574,6 @@ where
     ))
 }
 
-
-
-
 // -----------------------------------------------------------------------------
 // Full QABase/Quasar opening path
 // -----------------------------------------------------------------------------
@@ -4595,30 +4619,20 @@ where
     // These commitments are written before any evaluation-branch sumcheck
     // challenges are sampled.
     let (eval_witness, eval_aux_data) =
-        commit_eval_witness_with_basefold::<F, H>(
-            pp,
-            word,
-            z_left,
-            transcript,
-        )?;
+        commit_eval_witness_with_basefold::<F, H>(pp, word, z_left, transcript)?;
 
     // 3. Build one global BaseFold opening accumulator.
-    let mut opening_acc =
-        build_qabase_prover_opening_accumulator::<F, H>(&aux_data, pp);
+    let mut opening_acc = build_qabase_prover_opening_accumulator::<F, H>(&aux_data, pp);
 
     let eval_layout =
-        extend_prover_opening_accumulator_with_eval_aux::<F, H>(
-            &mut opening_acc,
-            &eval_aux_data,
-        );
+        extend_prover_opening_accumulator_with_eval_aux::<F, H>(&mut opening_acc, &eval_aux_data);
 
     // 4. Proximity QA encoding relation.
-    let encoding_relations =
-        prove_qabase_encoding_relations_batched_wht_sumcheck::<F, H>(
-            &pp.qa_params,
-            &folded_witness.folded_qa_witness,
-            transcript,
-        )?;
+    let encoding_relations = prove_qabase_encoding_relations_batched_wht_sumcheck::<F, H>(
+        &pp.qa_params,
+        &folded_witness.folded_qa_witness,
+        transcript,
+    )?;
 
     collect_qabase_item2_batched_wht_basefold_claims_prover::<F, H>(
         &mut opening_acc,
@@ -4630,11 +4644,7 @@ where
 
     // 5. Evaluation QA encoding relation.
     let eval_encoding_relations =
-        prove_qabase_eval_encoding_relations::<F, H>(
-            pp,
-            &eval_witness,
-            transcript,
-        )?;
+        prove_qabase_eval_encoding_relations::<F, H>(pp, &eval_witness, transcript)?;
 
     collect_qabase_eval_encoding_basefold_claims_prover::<F, H>(
         &mut opening_acc,
@@ -4656,35 +4666,32 @@ where
     )?;
 
     // 7. Evaluation sampled-column consistency.
-    let eval_folded_values =
-        qabase_eval_folded_values_from_comm::<F, H>(
-            comm,
-            &item1.query_indices,
-            &eval_witness.row_weights,
-        );
+    let eval_folded_values = qabase_eval_folded_values_from_comm::<F, H>(
+        comm,
+        &item1.query_indices,
+        &eval_witness.row_weights,
+    );
 
-    let eval_item1 =
-        prove_qabase_eval_column_consistency_collect::<F, H>(
-            &mut opening_acc,
-            eval_layout,
-            pp,
-            &item1.query_indices,
-            &eval_folded_values,
-            item1.tau,
-            &eval_witness,
-            transcript,
-        )?;
+    let eval_item1 = prove_qabase_eval_column_consistency_collect::<F, H>(
+        &mut opening_acc,
+        eval_layout,
+        pp,
+        &item1.query_indices,
+        &eval_folded_values,
+        item1.tau,
+        &eval_witness,
+        transcript,
+    )?;
 
     // 8. Final evaluation value claim:
     //      q^(0)(z_R) = claimed_value.
-    let ok_eval_value =
-        collect_qabase_eval_value_claim_prover::<F, H>(
-            &mut opening_acc,
-            eval_layout,
-            &z_right,
-            claimed_value,
-            &eval_witness,
-        )?;
+    let ok_eval_value = collect_qabase_eval_value_claim_prover::<F, H>(
+        &mut opening_acc,
+        eval_layout,
+        &z_right,
+        claimed_value,
+        &eval_witness,
+    )?;
 
     assert!(
         ok_eval_value,
@@ -4757,31 +4764,19 @@ where
         read_aux_commitments_from_transcript::<F, H>(vp, comm, transcript)?;
 
     // 2. Read evaluation auxiliary commitments.
-    let eval_aux_commitments =
-        read_eval_aux_commitments_from_transcript::<F, H>(
-            vp,
-            transcript,
-        )?;
+    let eval_aux_commitments = read_eval_aux_commitments_from_transcript::<F, H>(vp, transcript)?;
 
     // 3. Build one global BaseFold opening accumulator.
-    let mut opening_acc =
-        build_qabase_verifier_opening_accumulator::<F, H>(
-            vp,
-            &aux_commitments,
-        );
+    let mut opening_acc = build_qabase_verifier_opening_accumulator::<F, H>(vp, &aux_commitments);
 
-    let eval_layout =
-        extend_verifier_opening_accumulator_with_eval_aux::<F, H>(
-            &mut opening_acc,
-            &eval_aux_commitments,
-        );
+    let eval_layout = extend_verifier_opening_accumulator_with_eval_aux::<F, H>(
+        &mut opening_acc,
+        &eval_aux_commitments,
+    );
 
     // 4. Verify proximity QA encoding relation.
     let (ok_encoding, encoding_relations) =
-        verify_qabase_encoding_relations_batched_wht_sumcheck::<F, H>(
-            &vp.qa_params,
-            transcript,
-        )?;
+        verify_qabase_encoding_relations_batched_wht_sumcheck::<F, H>(&vp.qa_params, transcript)?;
 
     collect_qabase_item2_batched_wht_basefold_claims_verifier::<F, H>(
         &mut opening_acc,
@@ -4792,52 +4787,42 @@ where
 
     // 5. Verify evaluation QA encoding relation.
     let (ok_eval_encoding, eval_encoding_relations) =
-        verify_qabase_eval_encoding_relations::<F, H>(
-            vp,
-            transcript,
-        )?;
+        verify_qabase_eval_encoding_relations::<F, H>(vp, transcript)?;
 
-    let ok_eval_encoding_claims =
-        collect_qabase_eval_encoding_basefold_claims_verifier::<F, H>(
-            &mut opening_acc,
-            eval_layout,
-            &eval_encoding_relations,
-            transcript,
-        )?;
+    let ok_eval_encoding_claims = collect_qabase_eval_encoding_basefold_claims_verifier::<F, H>(
+        &mut opening_acc,
+        eval_layout,
+        &eval_encoding_relations,
+        transcript,
+    )?;
 
     // 6. Verify proximity sampled-column consistency.
     // This authenticates Merkle opened columns. The authenticated columns are
     // reused below by the evaluation sampled-column consistency check.
-    let (ok_item1, item1) =
-        verify_qabase_item1_column_consistency_collect::<F, H>(
-            &mut opening_acc,
-            vp,
-            comm,
-            &row_challenges,
-            transcript,
-        )?;
+    let (ok_item1, item1) = verify_qabase_item1_column_consistency_collect::<F, H>(
+        &mut opening_acc,
+        vp,
+        comm,
+        &row_challenges,
+        transcript,
+    )?;
 
     // 7. Verify evaluation sampled-column consistency using the same opened
     // columns, query_indices, and tau.
-    let row_weights =
-        qabase_row_weights_from_z_left::<F>(vp.num_rows, &z_left);
+    let row_weights = qabase_row_weights_from_z_left::<F>(vp.num_rows, &z_left);
 
     let eval_folded_values =
-        qabase_eval_folded_values_from_opened_columns::<F>(
-            &item1.opened_columns,
-            &row_weights,
-        );
+        qabase_eval_folded_values_from_opened_columns::<F>(&item1.opened_columns, &row_weights);
 
-    let (ok_eval_item1, eval_item1) =
-        verify_qabase_eval_column_consistency_collect::<F, H>(
-            &mut opening_acc,
-            eval_layout,
-            vp,
-            &item1.query_indices,
-            &eval_folded_values,
-            item1.tau,
-            transcript,
-        )?;
+    let (ok_eval_item1, eval_item1) = verify_qabase_eval_column_consistency_collect::<F, H>(
+        &mut opening_acc,
+        eval_layout,
+        vp,
+        &item1.query_indices,
+        &eval_folded_values,
+        item1.tau,
+        transcript,
+    )?;
 
     // 8. Add public evaluation value claim:
     //      q^(0)(z_R) = claimed_value.
@@ -4866,11 +4851,7 @@ where
     );
 
     let ok =
-        ok_encoding
-            && ok_eval_encoding
-            && ok_eval_encoding_claims
-            && ok_item1
-            && ok_eval_item1;
+        ok_encoding && ok_eval_encoding && ok_eval_encoding_claims && ok_item1 && ok_eval_item1;
 
     println!(
         "qabase full global batch + batched WHT verify {:?}, claims {:?}, ok {}",
@@ -4939,7 +4920,11 @@ mod test {
         assert_eq!(vp.num_rows, num_rows);
 
         let word = (0..num_rows)
-            .map(|_| (0..poly_size).map(|_| Fr::random(&mut rng)).collect::<Vec<_>>())
+            .map(|_| {
+                (0..poly_size)
+                    .map(|_| Fr::random(&mut rng))
+                    .collect::<Vec<_>>()
+            })
             .collect::<Vec<Vec<Fr>>>();
         let mut transcript = TestTranscript::new(());
         let comm = commit_and_write::<Fr, Blake2s>(&pp, &word, &mut transcript);
@@ -4947,7 +4932,8 @@ mod test {
         assert_eq!(comm.codeword.len(), num_rows);
         assert_eq!(comm.codeword_tree[0].len(), inverse_rate * poly_size);
         for row in 0..num_rows {
-            let msg_block = qa_codeword_block(&comm.codeword[row], poly_size, qa_message_block_index());
+            let msg_block =
+                qa_codeword_block(&comm.codeword[row], poly_size, qa_message_block_index());
             assert_eq!(msg_block, word[row].as_slice());
         }
     }
@@ -4971,18 +4957,26 @@ mod test {
         );
         let (pp, _) = trim::<Fr, Blake2s>(&param, poly_size, 1);
         let word = (0..num_rows)
-            .map(|_| (0..poly_size).map(|_| Fr::random(&mut rng)).collect::<Vec<_>>())
+            .map(|_| {
+                (0..poly_size)
+                    .map(|_| Fr::random(&mut rng))
+                    .collect::<Vec<_>>()
+            })
             .collect::<Vec<Vec<Fr>>>();
         let mut transcript = TestTranscript::new(());
         let comm = commit_and_write::<Fr, Blake2s>(&pp, &word, &mut transcript);
 
         assert_eq!(comm.codeword.len(), num_rows);
-        assert!(comm.qa_witnesses.is_empty(), "commitment should be codeword-only");
+        assert!(
+            comm.qa_witnesses.is_empty(),
+            "commitment should be codeword-only"
+        );
         for row in 0..num_rows {
             assert_eq!(comm.codeword[row].len(), inverse_rate * poly_size);
             let expected_witness = qa_encode_with_witness(&word[row], &pp.qa_params);
             for i in 0..(inverse_rate - 1) {
-                let parity_block = qa_codeword_block(&comm.codeword[row], poly_size, qa_parity_block_index(i));
+                let parity_block =
+                    qa_codeword_block(&comm.codeword[row], poly_size, qa_parity_block_index(i));
                 assert_eq!(parity_block, expected_witness.parity_blocks[i].as_slice());
             }
         }
@@ -5007,7 +5001,11 @@ mod test {
         );
         let (pp, vp) = trim::<Fr, Blake2s>(&param, poly_size, 1);
         let word = (0..num_rows)
-            .map(|_| (0..poly_size).map(|_| Fr::random(&mut rng)).collect::<Vec<_>>())
+            .map(|_| {
+                (0..poly_size)
+                    .map(|_| Fr::random(&mut rng))
+                    .collect::<Vec<_>>()
+            })
             .collect::<Vec<Vec<Fr>>>();
         let mut prover_transcript = TestTranscript::new(());
         let comm = commit_and_write::<Fr, Blake2s>(&pp, &word, &mut prover_transcript);
@@ -5021,10 +5019,17 @@ mod test {
         let proof = prover_transcript.into_proof();
         let mut verifier_transcript = TestTranscript::from_proof((), proof.as_slice());
         let (verifier_row_challenges, verifier_aux_commitments) =
-            read_aux_commitments_from_transcript::<Fr, Blake2s>(&vp, &comm, &mut verifier_transcript)
-                .unwrap();
+            read_aux_commitments_from_transcript::<Fr, Blake2s>(
+                &vp,
+                &comm,
+                &mut verifier_transcript,
+            )
+            .unwrap();
         assert_eq!(verifier_row_challenges, folded_witness.row_challenges);
-        assert_eq!(verifier_aux_commitments.u_prime_commitments.len(), inverse_rate - 1);
+        assert_eq!(
+            verifier_aux_commitments.u_prime_commitments.len(),
+            inverse_rate - 1
+        );
     }
 
     #[test]
@@ -5047,7 +5052,8 @@ mod test {
         let proof = prover_transcript.into_proof();
         let mut verifier_transcript = TestTranscript::from_proof((), proof.as_slice());
         let (ok, verifier_proof) =
-            verify_scaling_relation_sumcheck::<Fr, Blake2s>(&qa_params, &mut verifier_transcript).unwrap();
+            verify_scaling_relation_sumcheck::<Fr, Blake2s>(&qa_params, &mut verifier_transcript)
+                .unwrap();
         assert!(ok);
         assert_eq!(prover_proof.alpha, verifier_proof.alpha);
     }
@@ -5096,21 +5102,27 @@ mod test {
         let mut rng = ChaCha8Rng::from_seed([41u8; 32]);
         let param = Pcs::setup(poly_size, batch_size, &mut rng).unwrap();
         let (pp, vp) = Pcs::trim(&param, poly_size, batch_size).unwrap();
-        let evals_vec = (0..poly_size).map(|_| Fr::random(&mut rng)).collect::<Vec<_>>();
+        let evals_vec = (0..poly_size)
+            .map(|_| Fr::random(&mut rng))
+            .collect::<Vec<_>>();
         let poly = MultilinearPolynomial::new(evals_vec.clone());
-        let point_0 = (0..num_vars).map(|_| Fr::random(&mut rng)).collect::<Vec<_>>();
-        let point_1 = (0..num_vars).map(|_| Fr::random(&mut rng)).collect::<Vec<_>>();
+        let point_0 = (0..num_vars)
+            .map(|_| Fr::random(&mut rng))
+            .collect::<Vec<_>>();
+        let point_1 = (0..num_vars)
+            .map(|_| Fr::random(&mut rng))
+            .collect::<Vec<_>>();
         let value_0 = eval_mle_from_evals(&evals_vec, &point_0);
         let value_1 = eval_mle_from_evals(&evals_vec, &point_1);
         let points = vec![point_0, point_1];
-        let eval_claims = vec![Evaluation::new(0, 0, value_0), Evaluation::new(0, 1, value_1)];
+        let eval_claims = vec![
+            Evaluation::new(0, 0, value_0),
+            Evaluation::new(0, 1, value_1),
+        ];
         let mut prover_transcript = TestTranscript::new(());
-        let comms = Pcs::batch_commit_and_write(
-            &pp,
-            std::slice::from_ref(&poly),
-            &mut prover_transcript,
-        )
-        .unwrap();
+        let comms =
+            Pcs::batch_commit_and_write(&pp, std::slice::from_ref(&poly), &mut prover_transcript)
+                .unwrap();
         Pcs::batch_open(
             &pp,
             std::slice::from_ref(&poly),
@@ -5152,7 +5164,11 @@ mod test {
         );
         let (pp, vp) = trim::<Fr, Blake2s>(&param, poly_size, 1);
         let word = (0..num_rows)
-            .map(|_| (0..poly_size).map(|_| Fr::random(&mut rng)).collect::<Vec<_>>())
+            .map(|_| {
+                (0..poly_size)
+                    .map(|_| Fr::random(&mut rng))
+                    .collect::<Vec<_>>()
+            })
             .collect::<Vec<Vec<Fr>>>();
         let mut prover_transcript = TestTranscript::new(());
         let comm = commit_and_write::<Fr, Blake2s>(&pp, &word, &mut prover_transcript);
@@ -5166,22 +5182,38 @@ mod test {
 
         let proof = prover_transcript.into_proof();
         let mut verifier_transcript = TestTranscript::from_proof((), proof.as_slice());
-        let (ok, verifier_output) = verify_qabase_open_scaffold_global_batch_batched_wht::<Fr, Blake2s>(
-            &vp,
-            &comm,
-            &mut verifier_transcript,
-        )
+        let (ok, verifier_output) = verify_qabase_open_scaffold_global_batch_batched_wht::<
+            Fr,
+            Blake2s,
+        >(&vp, &comm, &mut verifier_transcript)
         .unwrap();
         assert!(ok);
-        assert_eq!(prover_output.folded_witness.row_challenges, verifier_output.row_challenges);
-        assert_eq!(prover_output.item1.query_indices, verifier_output.item1.query_indices);
-        assert_eq!(prover_output.item1.folded_values, verifier_output.item1.folded_values);
-        assert_eq!(prover_output.encoding_relations.batched_wht.gammas.len(), inverse_rate);
+        assert_eq!(
+            prover_output.folded_witness.row_challenges,
+            verifier_output.row_challenges
+        );
+        assert_eq!(
+            prover_output.item1.query_indices,
+            verifier_output.item1.query_indices
+        );
+        assert_eq!(
+            prover_output.item1.folded_values,
+            verifier_output.item1.folded_values
+        );
+        assert_eq!(
+            prover_output.encoding_relations.batched_wht.gammas.len(),
+            inverse_rate
+        );
 
-        let direct_folded_msg = linear_combine_rows(&word, &prover_output.folded_witness.row_challenges);
+        let direct_folded_msg =
+            linear_combine_rows(&word, &prover_output.folded_witness.row_challenges);
         assert_eq!(direct_folded_msg, prover_output.folded_witness.folded_msg);
-        let direct_witness = qa_encode_with_witness(&prover_output.folded_witness.folded_msg, &pp.qa_params);
-        assert_eq!(direct_witness.codeword, prover_output.folded_witness.folded_qa_witness.codeword);
+        let direct_witness =
+            qa_encode_with_witness(&prover_output.folded_witness.folded_msg, &pp.qa_params);
+        assert_eq!(
+            direct_witness.codeword,
+            prover_output.folded_witness.folded_qa_witness.codeword
+        );
     }
 
     #[test]
@@ -5239,15 +5271,16 @@ mod test {
         let proof = prover_transcript.into_proof();
         let mut verifier_transcript = TestTranscript::from_proof((), proof.as_slice());
 
-        let (ok, verifier_output) = verify_qabase_open_full_global_batch_batched_wht::<Fr, Blake2s>(
-            &vp,
-            &comm,
-            z_left,
-            z_right,
-            claimed_value,
-            &mut verifier_transcript,
-        )
-        .unwrap();
+        let (ok, verifier_output) =
+            verify_qabase_open_full_global_batch_batched_wht::<Fr, Blake2s>(
+                &vp,
+                &comm,
+                z_left,
+                z_right,
+                claimed_value,
+                &mut verifier_transcript,
+            )
+            .unwrap();
 
         assert!(ok);
         assert!(prover_output.ok_eval_value);
@@ -5272,5 +5305,4 @@ mod test {
             verifier_output.eval_item1.eval_folded_values
         );
     }
-
 }

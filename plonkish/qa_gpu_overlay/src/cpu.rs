@@ -149,17 +149,17 @@ where
 /// This preserves the same systematic output layout as
 /// `qa_encode_codeword_only`; unlike row-level parallelism, it remains useful
 /// when the benchmark contains one message and one QA codeword.
-pub fn qa_encode_cpu_parallel_single_row<F>(
-    message: &[F],
-    params: &QAParams<F>,
-) -> Vec<F>
+pub fn qa_encode_cpu_parallel_single_row<F>(message: &[F], params: &QAParams<F>) -> Vec<F>
 where
     F: PrimeField + Send + Sync,
 {
     let row_len = message.len();
     assert!(row_len.is_power_of_two());
     assert_eq!(params.e.len() + 1, params.inverse_rate);
-    assert!(params.e.iter().all(|coefficients| coefficients.len() == row_len));
+    assert!(params
+        .e
+        .iter()
+        .all(|coefficients| coefficients.len() == row_len));
 
     let mut transformed = message.to_vec();
     wht_parallel_single_row(&mut transformed);
@@ -273,8 +273,12 @@ where
     F: PrimeField,
 {
     assert!(elements > 0 && repetitions > 0);
-    let a = (0..elements).map(|_| F::random(&mut *rng)).collect::<Vec<_>>();
-    let b = (0..elements).map(|_| F::random(&mut *rng)).collect::<Vec<_>>();
+    let a = (0..elements)
+        .map(|_| F::random(&mut *rng))
+        .collect::<Vec<_>>();
+    let b = (0..elements)
+        .map(|_| F::random(&mut *rng))
+        .collect::<Vec<_>>();
     let mut out = vec![F::ZERO; elements];
 
     let start = Instant::now();

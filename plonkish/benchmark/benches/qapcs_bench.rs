@@ -25,8 +25,7 @@
 use plonkish_backend::{
     pcs::{
         multilinear::qapcs::{
-            qapcs_open_full, qapcs_verify_full, MultilinearQAPCS, QAPCSSpec,
-            QAPCSSpecRateHalf100,
+            qapcs_open_full, qapcs_verify_full, MultilinearQAPCS, QAPCSSpec, QAPCSSpecRateHalf100,
         },
         PolynomialCommitmentScheme,
     },
@@ -35,9 +34,7 @@ use plonkish_backend::{
         arithmetic::{inner_product, Field, PrimeField},
         hash::{Blake2s, Output},
         new_fields::Mersenne127,
-        transcript::{
-            Blake2sTranscript, InMemoryTranscript, TranscriptRead, TranscriptWrite,
-        },
+        transcript::{Blake2sTranscript, InMemoryTranscript, TranscriptRead, TranscriptWrite},
     },
 };
 use rand_chacha::{rand_core::SeedableRng, ChaCha8Rng};
@@ -159,13 +156,11 @@ fn bench_one_total_k(total_k: usize, args: &Args) -> BenchResult {
     let mut setup_rng = ChaCha8Rng::from_seed(seed_from(total_k, usize::MAX));
 
     let setup_start = Instant::now();
-    let param =
-        BenchPcs::setup(poly_size, 1, &mut setup_rng).expect("QAPCS setup failed");
+    let param = BenchPcs::setup(poly_size, 1, &mut setup_rng).expect("QAPCS setup failed");
     let setup_time = setup_start.elapsed();
 
     let trim_start = Instant::now();
-    let (pp, vp) =
-        BenchPcs::trim(&param, poly_size, 1).expect("QAPCS trim failed");
+    let (pp, vp) = BenchPcs::trim(&param, poly_size, 1).expect("QAPCS trim failed");
     let trim_time = trim_start.elapsed();
 
     let shape = pp.shape().clone();
@@ -212,8 +207,7 @@ fn bench_one_total_k(total_k: usize, args: &Args) -> BenchResult {
     let mut commit_times = Vec::with_capacity(args.samples);
     for sample in 0..args.samples {
         let start = Instant::now();
-        let comm =
-            BenchPcs::commit(&pp, &poly).expect("QAPCS commitment failed");
+        let comm = BenchPcs::commit(&pp, &poly).expect("QAPCS commitment failed");
         let elapsed = start.elapsed();
         commit_times.push(elapsed);
 
@@ -233,8 +227,7 @@ fn bench_one_total_k(total_k: usize, args: &Args) -> BenchResult {
     }
 
     // One reusable commitment for all opening/verification samples.
-    let comm =
-        BenchPcs::commit(&pp, &poly).expect("reusable QAPCS commitment failed");
+    let comm = BenchPcs::commit(&pp, &poly).expect("reusable QAPCS commitment failed");
 
     let mut open_times = Vec::with_capacity(args.samples);
     let mut verify_times = Vec::with_capacity(args.samples);
@@ -244,10 +237,10 @@ fn bench_one_total_k(total_k: usize, args: &Args) -> BenchResult {
         let mut prover_transcript = BenchTranscript::new(());
 
         // Bind all subsequent Fiat--Shamir challenges to the main commitment.
-        <BenchTranscript as TranscriptWrite<
-            BenchCommitmentChunk,
-            BenchField,
-        >>::write_commitment(&mut prover_transcript, comm.root())
+        <BenchTranscript as TranscriptWrite<BenchCommitmentChunk, BenchField>>::write_commitment(
+            &mut prover_transcript,
+            comm.root(),
+        )
         .expect("failed to write QAPCS commitment root");
 
         let open_start = Instant::now();
@@ -266,8 +259,7 @@ fn bench_one_total_k(total_k: usize, args: &Args) -> BenchResult {
         let proof = prover_transcript.into_proof();
         last_proof_bytes = proof.len();
 
-        let mut verifier_transcript =
-            BenchTranscript::from_proof((), proof.as_slice());
+        let mut verifier_transcript = BenchTranscript::from_proof((), proof.as_slice());
 
         // Match the Quasar benchmark: verifier time includes reading and
         // checking the public commitment root.
@@ -325,8 +317,7 @@ fn bench_one_total_k(total_k: usize, args: &Args) -> BenchResult {
         codeword_len: shape.codeword_len,
         inverse_rate: <BenchSpec as QAPCSSpec>::inverse_rate(),
         security_bits: <BenchSpec as QAPCSSpec>::security_bits(),
-        distance_failure_bits:
-            <BenchSpec as QAPCSSpec>::distance_failure_bits(),
+        distance_failure_bits: <BenchSpec as QAPCSSpec>::distance_failure_bits(),
         delta: shape.delta,
         queries: shape.num_column_opening,
         proximity_reps: shape.num_proximity_testing,
@@ -345,9 +336,7 @@ fn random_vec<F>(len: usize, rng: &mut ChaCha8Rng) -> Vec<F>
 where
     F: Field,
 {
-    (0..len)
-        .map(|_| F::random(&mut *rng))
-        .collect()
+    (0..len).map(|_| F::random(&mut *rng)).collect()
 }
 
 /// Evaluate a row-major MLE in O(N) field operations.
@@ -376,10 +365,8 @@ where
     assert_eq!(point.len(), log_columns + log_rows);
 
     let (column_point, row_point) = point.split_at(log_columns);
-    let row_weights =
-        MultilinearPolynomial::<F>::eq_xy(row_point).into_evals();
-    let column_weights =
-        MultilinearPolynomial::<F>::eq_xy(column_point).into_evals();
+    let row_weights = MultilinearPolynomial::<F>::eq_xy(row_point).into_evals();
+    let column_weights = MultilinearPolynomial::<F>::eq_xy(column_point).into_evals();
 
     assert_eq!(row_weights.len(), num_rows);
     assert_eq!(column_weights.len(), row_len);
@@ -433,8 +420,7 @@ fn duration_ms(duration: Duration) -> f64 {
 
 fn ensure_output_dir() {
     if !Path::new(OUTPUT_DIR).exists() {
-        create_dir_all(OUTPUT_DIR)
-            .expect("failed to create benchmark output directory");
+        create_dir_all(OUTPUT_DIR).expect("failed to create benchmark output directory");
     }
 }
 
@@ -451,8 +437,7 @@ fn output_path(args: &Args) -> String {
 
 fn write_header_if_new(path: &str) {
     if !Path::new(path).exists() {
-        let mut file =
-            File::create(path).expect("failed to create output CSV");
+        let mut file = File::create(path).expect("failed to create output CSV");
 
         writeln!(
             &mut file,
@@ -529,24 +514,18 @@ impl Args {
         while let Some(flag) = iter.next() {
             match flag.as_str() {
                 "--total-k" => {
-                    let value = iter
-                        .next()
-                        .expect("--total-k needs a value, e.g. 20..=28");
+                    let value = iter.next().expect("--total-k needs a value, e.g. 20..=28");
                     let (start, end) = parse_range_inclusive(&value);
                     args.total_k_start = start;
                     args.total_k_end = end;
                 }
                 "--samples" => {
-                    let value =
-                        iter.next().expect("--samples needs a value");
-                    args.samples =
-                        value.parse().expect("invalid --samples value");
+                    let value = iter.next().expect("--samples needs a value");
+                    args.samples = value.parse().expect("invalid --samples value");
                 }
                 "--threads" => {
-                    let value =
-                        iter.next().expect("--threads needs a value");
-                    args.threads =
-                        value.parse().expect("invalid --threads value");
+                    let value = iter.next().expect("--threads needs a value");
+                    args.threads = value.parse().expect("invalid --threads value");
                 }
                 "--bench" => {
                     // Defensive only. Cargo normally consumes this.
@@ -597,10 +576,8 @@ fn seed_from(total_k: usize, sample: usize) -> [u8; 32] {
     let mut seed = [0u8; 32];
     seed[0..8].copy_from_slice(&(total_k as u64).to_le_bytes());
     seed[8..16].copy_from_slice(&(sample as u64).to_le_bytes());
-    seed[16..24]
-        .copy_from_slice(&0x5141_5043_535f_4245u64.to_le_bytes());
-    seed[24..32]
-        .copy_from_slice(&0x4e43_484d_4152_4b21u64.to_le_bytes());
+    seed[16..24].copy_from_slice(&0x5141_5043_535f_4245u64.to_le_bytes());
+    seed[24..32].copy_from_slice(&0x4e43_484d_4152_4b21u64.to_le_bytes());
     seed
 }
 

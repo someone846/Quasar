@@ -2,9 +2,8 @@
 
 use plonkish_backend::{
     pcs::multilinear::quasar::{
-        commit_and_write, eval_mle_from_evals,
-        prove_qabase_open_full_two_layer_gkr, qabase_split_evaluation_point,
-        setup, trim, verify_qabase_open_full_two_layer_gkr,
+        commit_and_write, eval_mle_from_evals, prove_qabase_open_full_two_layer_gkr,
+        qabase_split_evaluation_point, setup, trim, verify_qabase_open_full_two_layer_gkr,
     },
     util::{
         arithmetic::Field,
@@ -52,9 +51,7 @@ fn cuda_commitment_matches_cpu_and_verifies() {
     let mut cuda = CudaQuasarCommitter::new(&pp, &word, 4).unwrap();
     cuda.warm_up().unwrap();
     let mut prover_transcript = TestTranscript::new(());
-    let (cuda_commitment, _) = cuda
-        .commit_and_write(&pp, &mut prover_transcript)
-        .unwrap();
+    let (cuda_commitment, _) = cuda.commit_and_write(&pp, &mut prover_transcript).unwrap();
     let cuda_root: &Output<Blake2s> = cuda_commitment.as_ref();
     assert_eq!(cuda_commitment.codeword_tree[0], cpu_leaves);
     assert_eq!(cuda_root, &cpu_root);
@@ -63,11 +60,8 @@ fn cuda_commitment_matches_cpu_and_verifies() {
     let point = (0..total_vars)
         .map(|_| Mersenne127::random(&mut rng))
         .collect::<Vec<_>>();
-    let (z_left, z_right) = qabase_split_evaluation_point(
-        &point,
-        num_rows,
-        row_len.trailing_zeros() as usize,
-    );
+    let (z_left, z_right) =
+        qabase_split_evaluation_point(&point, num_rows, row_len.trailing_zeros() as usize);
     let flat = word.iter().flatten().copied().collect::<Vec<_>>();
     let value = eval_mle_from_evals(&flat, &point);
 

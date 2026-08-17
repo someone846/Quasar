@@ -1,7 +1,10 @@
-use crate::util::avx_int_types::{u512::Blazeu512,u64x8::Blazeu64x8,u256::Blazeu256};
-use num_traits::Zero;
-use crate::util::{arithmetic::div_ceil,avx_int_types::{BlazeField,u64::Blazeu64}};
+use crate::util::avx_int_types::{u256::Blazeu256, u512::Blazeu512, u64x8::Blazeu64x8};
+use crate::util::{
+    arithmetic::div_ceil,
+    avx_int_types::{u64::Blazeu64, BlazeField},
+};
 use ff::{BatchInvert, PrimeField, PrimeFieldBits};
+use num_traits::Zero;
 
 use rand::prelude::IteratorRandom;
 use rand_chacha::{
@@ -14,16 +17,15 @@ use std::time::{Duration, Instant};
 use rayon::prelude::*;
 use std::collections::HashMap;
 
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Permutation{
+pub struct Permutation {
     pub permutation1: Vec<usize>,
     pub permutation2: Vec<usize>,
     pub permutation3: Vec<usize>,
-    pub puncturing: HashMap<usize,bool>
+    pub puncturing: HashMap<usize, bool>,
 }
 
-impl Permutation{
+impl Permutation {
     // Samples a permutation of the given length, represented as a vector
     // where permutation[i] = j means that the element vector[i] should
     // be mapped to position j after permuting.
@@ -33,11 +35,16 @@ impl Permutation{
         let permutation3 = Self::get_permutation(&mut rng, length);
         let puncturing = Self::get_puncturing(&mut rng, length);
         assert_eq!(puncturing.len(), length >> 1);
-        Self{ permutation1, permutation2, permutation3, puncturing  }
+        Self {
+            permutation1,
+            permutation2,
+            permutation3,
+            puncturing,
+        }
     }
 
-    pub fn get_permutation(mut rng:&mut ChaCha8Rng, length:usize) -> Vec<usize>{
-         let mut permutation = Vec::with_capacity(length);
+    pub fn get_permutation(mut rng: &mut ChaCha8Rng, length: usize) -> Vec<usize> {
+        let mut permutation = Vec::with_capacity(length);
 
         // Create vector of all indices 0,1,...,length-1.
         let mut rem = vec![0usize; length];
@@ -50,53 +57,55 @@ impl Permutation{
         let mut i = 0;
         while i < length {
             let j = (0..rem.len()).choose(rng).unwrap();
-            permutation.push(rem[j] );
+            permutation.push(rem[j]);
             rem.swap_remove(j as usize);
             i = i + 1;
         }
         permutation
     }
 
-    pub fn get_puncturing(mut rng:&mut ChaCha8Rng, length:usize) -> HashMap<usize,bool>{
+    pub fn get_puncturing(mut rng: &mut ChaCha8Rng, length: usize) -> HashMap<usize, bool> {
         let indices = (0..length).choose_multiple(rng, length >> 1);
         let mut res = HashMap::new();
-        for i in indices{
-            res.insert(i,true);
+        for i in indices {
+            res.insert(i, true);
         }
         return res;
     }
 
     // Applies permutation to input vector and then punctures.
-    fn interleave2<F:BlazeField>(&self, input: Vec<F>) -> Vec<F> {
+    fn interleave2<F: BlazeField>(&self, input: Vec<F>) -> Vec<F> {
         let mut new_input = vec![F::zero(); input.len()];
         new_input.par_iter_mut().enumerate().for_each(|(i, mut x)| {
             let mut j = self.permutation2[i];
             *x = input[j];
         });
-        new_input 
+        new_input
     }
 
-    fn interleave3<F:BlazeField>(&self, input: Vec<F>) -> Vec<F> {
+    fn interleave3<F: BlazeField>(&self, input: Vec<F>) -> Vec<F> {
         let mut new_input = vec![F::zero(); input.len()];
         new_input.par_iter_mut().enumerate().for_each(|(i, mut x)| {
             let mut j = self.permutation3[i];
             *x = input[j];
         });
-        new_input 
+        new_input
     }
     // Applies permutation to input vector and then punctures.
-    fn puncture<F:BlazeField>(&self, input: Vec<F>) -> Vec<F> {
-        let new_input = input.iter().enumerate().filter(|(i,x)| self.puncturing.contains_key(i)).map(|(i,x)| *x).collect::<Vec<_>>();
+    fn puncture<F: BlazeField>(&self, input: Vec<F>) -> Vec<F> {
+        let new_input = input
+            .iter()
+            .enumerate()
+            .filter(|(i, x)| self.puncturing.contains_key(i))
+            .map(|(i, x)| *x)
+            .collect::<Vec<_>>();
         assert_eq!(new_input.len(), input.len() >> 1);
-        new_input 
+        new_input
     }
 
-
-
-
-    pub fn interleave_long<F:BlazeField>(&self, input: &Vec<Vec<F>>) -> Vec<Vec<F>>{
+    pub fn interleave_long<F: BlazeField>(&self, input: &Vec<Vec<F>>) -> Vec<Vec<F>> {
         let mut new_inputs = Vec::new();
-        for vec in input{
+        for vec in input {
             let mut new_input = vec![F::zero(); vec.len()];
             new_input.par_iter_mut().enumerate().for_each(|(i, mut x)| {
                 let mut j = self.permutation2[i];
@@ -107,11 +116,10 @@ impl Permutation{
         new_inputs
     }
 
-
     // Repeats the input and then applies the permutation.
-    fn repeat_interleave<F:BlazeField>(&self, input: Vec<F>, rate: usize) -> Vec<F> {
-        let mut new_input = vec![F::zero();input.len() * rate]; 
-        let repetition = repetition_code(&input,rate);
+    fn repeat_interleave<F: BlazeField>(&self, input: Vec<F>, rate: usize) -> Vec<F> {
+        let mut new_input = vec![F::zero(); input.len() * rate];
+        let repetition = repetition_code(&input, rate);
         new_input.iter_mut().enumerate().for_each(|(i, mut x)| {
             let mut y = self.permutation1[i];
             *x = repetition[y as usize];
@@ -119,13 +127,17 @@ impl Permutation{
         repetition
     }
 
-        // Repeats the input and then applies the permutation.
-    fn repeat_interleave_long<F:BlazeField>(&self, input: &Vec<Vec<F>>, rate: usize) -> Vec<Vec<F>>{
+    // Repeats the input and then applies the permutation.
+    fn repeat_interleave_long<F: BlazeField>(
+        &self,
+        input: &Vec<Vec<F>>,
+        rate: usize,
+    ) -> Vec<Vec<F>> {
         let mut new_inputs = Vec::new();
-        for vec in input{
+        for vec in input {
             let mut new_input = vec![F::zero(); vec.len() * rate];
             new_input.par_iter_mut().enumerate().for_each(|(i, mut x)| {
-                let mut y = 1;//((self.permutation[i] / rate) as f64).floor();
+                let mut y = 1; //((self.permutation[i] / rate) as f64).floor();
                 *x = vec[y as usize];
             });
             new_inputs.push(new_input);
@@ -133,20 +145,19 @@ impl Permutation{
         new_inputs
     }
 }
-    #[test]
-    fn test_puncture(){
-        type F = Blazeu64;
-        let mut rng = ChaCha8Rng::from_entropy();
-        let perm = Permutation::create(&mut rng, 1<<15);
-        let a = F { value: 8u64 };
-        let b = F {value : 16u64}; 
-        let input = vec![a;1<<15];
-        let now = Instant::now();
-        let result = perm.puncture(input);
-        println!("puncture {:?}", now.elapsed());
-        //println!("output {:?}", result);
-
-    }
+#[test]
+fn test_puncture() {
+    type F = Blazeu64;
+    let mut rng = ChaCha8Rng::from_entropy();
+    let perm = Permutation::create(&mut rng, 1 << 15);
+    let a = F { value: 8u64 };
+    let b = F { value: 16u64 };
+    let input = vec![a; 1 << 15];
+    let now = Instant::now();
+    let result = perm.puncture(input);
+    println!("puncture {:?}", now.elapsed());
+    //println!("output {:?}", result);
+}
 
 pub fn log2_strict(n: usize) -> usize {
     let res = n.trailing_zeros();
@@ -156,7 +167,7 @@ pub fn log2_strict(n: usize) -> usize {
     res as usize
 }
 
-fn serial_accumulator<F:BlazeField>(mut input: &mut Vec<F>) {
+fn serial_accumulator<F: BlazeField>(mut input: &mut Vec<F>) {
     let mut prev_value = F::zero();
     for i in 0..input.len() {
         input[i] = input[i] ^ prev_value;
@@ -164,24 +175,26 @@ fn serial_accumulator<F:BlazeField>(mut input: &mut Vec<F>) {
     }
 }
 
-pub fn serial_accumulator_long<F:BlazeField>(mut input:&mut Vec<Vec<F>>){
-    input.par_iter_mut().for_each(|mut v|{
+pub fn serial_accumulator_long<F: BlazeField>(mut input: &mut Vec<Vec<F>>) {
+    input.par_iter_mut().for_each(|mut v| {
         serial_accumulator(&mut v);
     });
 }
 
-
-pub fn repetition_code_long<F:BlazeField>(input: &Vec<Vec<F>>, rate: usize) -> Vec<Vec<F>> {
-    input.par_iter().map(|v|{
-        let mut final_codeword = vec![F::zero(); v.len() * rate];
-    //repeat each element "rate" times
-        for (i, m) in v.iter().enumerate() {
-            for j in 0..rate {
-                final_codeword[i * rate + j] = *m;
+pub fn repetition_code_long<F: BlazeField>(input: &Vec<Vec<F>>, rate: usize) -> Vec<Vec<F>> {
+    input
+        .par_iter()
+        .map(|v| {
+            let mut final_codeword = vec![F::zero(); v.len() * rate];
+            //repeat each element "rate" times
+            for (i, m) in v.iter().enumerate() {
+                for j in 0..rate {
+                    final_codeword[i * rate + j] = *m;
+                }
             }
-        }
-        return final_codeword;
-    }).collect::<Vec<_>>()
+            return final_codeword;
+        })
+        .collect::<Vec<_>>()
 }
 
 fn repetition_code<F: BlazeField>(message: &Vec<F>, rate: usize) -> Vec<F> {
@@ -195,29 +208,31 @@ fn repetition_code<F: BlazeField>(message: &Vec<F>, rate: usize) -> Vec<F> {
     return final_codeword;
 }
 
-
 #[test]
-fn test_rep_code_long(){
+fn test_rep_code_long() {
     type F = Blazeu64;
-    let el1 = Blazeu64{ value: 1};
-    let el2 = Blazeu64{ value: 2};
-    let el3 = Blazeu64{ value: 3};
-    let el4 = Blazeu64{ value: 4};
-    let input = vec![vec![el1,el2],vec![el3,el4]];
-    assert_eq!(repetition_code_long(&input, 2), vec![vec![el1,el1,el2,el2],vec![el3,el3,el4,el4]]);
+    let el1 = Blazeu64 { value: 1 };
+    let el2 = Blazeu64 { value: 2 };
+    let el3 = Blazeu64 { value: 3 };
+    let el4 = Blazeu64 { value: 4 };
+    let input = vec![vec![el1, el2], vec![el3, el4]];
+    assert_eq!(
+        repetition_code_long(&input, 2),
+        vec![vec![el1, el1, el2, el2], vec![el3, el3, el4, el4]]
+    );
 }
 
 #[test]
-fn test_rep_code(){
+fn test_rep_code() {
     type F = Blazeu64;
-    let el1 = Blazeu64{ value: 1};
-    let el2 = Blazeu64{ value: 2};
-    let el3 = Blazeu64{ value: 3};
-    let el4 = Blazeu64{ value: 4};
-    let input = vec![el1,el2];
-    assert_eq!(repetition_code(&input, 2), vec![el1,el1,el2,el2]);
+    let el1 = Blazeu64 { value: 1 };
+    let el2 = Blazeu64 { value: 2 };
+    let el3 = Blazeu64 { value: 3 };
+    let el4 = Blazeu64 { value: 4 };
+    let input = vec![el1, el2];
+    assert_eq!(repetition_code(&input, 2), vec![el1, el1, el2, el2]);
 }
-fn parallel_accumulator<F:BlazeField>(mut input: &mut Vec<F>) {
+fn parallel_accumulator<F: BlazeField>(mut input: &mut Vec<F>) {
     //upward sweeep
     let size_per_core = input.len() / 8;
     input.par_chunks_mut(size_per_core).for_each(|chunk| {
@@ -264,12 +279,35 @@ fn test_permutation() {
     let mut rng = ChaCha8Rng::from_entropy();
     let p = Permutation::create(&mut rng, 10);
     println!("permutation {:?}", p.permutation1);
-    let mut input = vec![Blazeu64{value:0}, Blazeu64{value:1}, Blazeu64{value:2}, Blazeu64{value:3}, Blazeu64{value:4}, Blazeu64{value:5}, Blazeu64{value:6}, Blazeu64{value:7}, Blazeu64{value:8}, Blazeu64{value:9}];
-    let mut input_short = vec![Blazeu64{value:0}, Blazeu64{value:1}, Blazeu64{value:2}, Blazeu64{value:3}, Blazeu64{value: 4}];
+    let mut input = vec![
+        Blazeu64 { value: 0 },
+        Blazeu64 { value: 1 },
+        Blazeu64 { value: 2 },
+        Blazeu64 { value: 3 },
+        Blazeu64 { value: 4 },
+        Blazeu64 { value: 5 },
+        Blazeu64 { value: 6 },
+        Blazeu64 { value: 7 },
+        Blazeu64 { value: 8 },
+        Blazeu64 { value: 9 },
+    ];
+    let mut input_short = vec![
+        Blazeu64 { value: 0 },
+        Blazeu64 { value: 1 },
+        Blazeu64 { value: 2 },
+        Blazeu64 { value: 3 },
+        Blazeu64 { value: 4 },
+    ];
     println!("input {:?}", input);
     let permuted_input = p.interleave2(input);
     println!("permutted input (no rep) {:?}", permuted_input);
-    assert_eq!(permuted_input.iter().map(|x| x.get_value() as usize).collect::<Vec<_>>(), p.permutation1);
+    assert_eq!(
+        permuted_input
+            .iter()
+            .map(|x| x.get_value() as usize)
+            .collect::<Vec<_>>(),
+        p.permutation1
+    );
     println!("input {:?}", input_short);
     let permuted_input = p.repeat_interleave(input_short, 2);
     println!("permutted input (after 2 reps) {:?}", permuted_input);
@@ -280,7 +318,7 @@ fn test_permutation_performance() {
     let k = 22;
     let mut rng = ChaCha8Rng::from_entropy();
     let p = Permutation::create(&mut rng, 1 << k);
-    let mut input = vec![Blazeu64{ value: 1u64}; 1 << k - 2];
+    let mut input = vec![Blazeu64 { value: 1u64 }; 1 << k - 2];
     let now = Instant::now();
     p.repeat_interleave(input, 4);
     println!("repeat 4 times then interleave {:?}", now.elapsed());
@@ -289,17 +327,17 @@ fn test_permutation_performance() {
 #[test]
 fn test_accumulator() {
     let mut rng = ChaCha8Rng::from_entropy();
-  //  let p = Permutation::create(&mut rng, 4 * (1 << 21));
+    //  let p = Permutation::create(&mut rng, 4 * (1 << 21));
     //println!("perm {:?}", p.permutation);
-    let mut input = Blazeu64::rand_vec(1<<21);
+    let mut input = Blazeu64::rand_vec(1 << 21);
     let now = Instant::now();
-  //  input = p.repeat_interleave(input, 4);
+    //  input = p.repeat_interleave(input, 4);
     parallel_accumulator(&mut input);
     println!("time to accumulate {:?}", now.elapsed());
 }
 
 fn compare_accumulators(k: usize) {
-    let mut input = vec![Blazeu64{value: 1u64}; 1 << k];
+    let mut input = vec![Blazeu64 { value: 1u64 }; 1 << k];
     let now = Instant::now();
     parallel_accumulator(&mut input);
     println!("parallel accumulator {:?} : {:?}", k, now.elapsed());
@@ -317,34 +355,27 @@ fn test_accumulator_performance() {
     // compare_accumulators(30);
 }
 
-pub fn encode_bits<F:BlazeField>(
+pub fn encode_bits<F: BlazeField>(
     message: Vec<F>,
     p1: &Permutation,
     rate: usize,
     mut timer: &mut Duration,
 ) -> Vec<F> {
-
     let x = message.len();
     let mut first_round = p1.repeat_interleave(message, rate); // Repeat and interleave.
 
-    assert_eq!(first_round.len(),x*rate);
+    assert_eq!(first_round.len(), x * rate);
     serial_accumulator(&mut first_round); // Accumulate
-    assert_eq!(first_round.len(),x*rate);
+    assert_eq!(first_round.len(), x * rate);
     let mut second_round = p1.interleave2(first_round); // Interleave
-    assert_eq!(second_round.len(),x*rate);
+    assert_eq!(second_round.len(), x * rate);
 
     serial_accumulator(&mut second_round); // Accumulate
-
-
 
     second_round
 }
 
-pub fn encode_bits_ser<F:BlazeField>(
-    message: Vec<F>,
-    p: &Permutation,
-    rate: usize
-) -> Vec<F> {
+pub fn encode_bits_ser<F: BlazeField>(message: Vec<F>, p: &Permutation, rate: usize) -> Vec<F> {
     let mut first_round = p.repeat_interleave(message, rate); // Repeat and interleave.
     serial_accumulator(&mut first_round); // Accumulate
     let mut second_round = p.interleave2(first_round); // Interleave
@@ -353,29 +384,26 @@ pub fn encode_bits_ser<F:BlazeField>(
     serial_accumulator(&mut third_round);
     third_round
 }
-pub fn encode_bits_long<F:BlazeField>(
+pub fn encode_bits_long<F: BlazeField>(
     message: &Vec<Vec<F>>,
     p1: &Permutation,
     p2: &Permutation,
     rate: usize,
     mut timer: &mut Duration,
 ) -> Vec<Vec<F>> {
-
     let x = message[0].len();
     let mut first_round = p1.repeat_interleave_long(message, rate); // Repeat and interleave.
 
- //   assert_eq!(first_round[0].len(),x*rate);
+    //   assert_eq!(first_round[0].len(),x*rate);
     serial_accumulator_long(&mut first_round); // Accumulate
- //   assert_eq!(first_round[0].len(),x*rate);
+                                               //   assert_eq!(first_round[0].len(),x*rate);
     let mut second_round = p2.interleave_long(&first_round); // Interleave
- //   assert_eq!(second_round[0].len(),x*rate);
+                                                             //   assert_eq!(second_round[0].len(),x*rate);
 
     serial_accumulator_long(&mut second_round); // Accumulate
 
-
     second_round
 }
-
 
 fn test_encode_bits(k: usize) {
     // Sample permutations.
@@ -388,7 +416,7 @@ fn test_encode_bits(k: usize) {
     // Encode one test message.
     let mut test_message64 = Vec::new();
     for i in 0..(1 << k - 2) {
-        test_message64.push(Blazeu64{value:i});
+        test_message64.push(Blazeu64 { value: i });
     }
     let mut timer = Duration::new(0, 0);
     let codeword = encode_bits(test_message64, &p1, 4, &mut timer);
@@ -405,7 +433,7 @@ fn test_encode_bits_long_64(k: usize, col_size: usize) {
 
     // Encode one test message.
     let mut test_message64 = Vec::new();
-    for i in 0..col_size{
+    for i in 0..col_size {
         test_message64.push(Blazeu64::rand_vec(1 << (k - 2)));
     }
     let mut timer = Duration::new(0, 0);
@@ -474,12 +502,9 @@ fn test_encode() {
 }
 
 #[test]
-fn test_encode_long(){
-    test_encode_bits_long_64(21,2);
-
+fn test_encode_long() {
+    test_encode_bits_long_64(21, 2);
 }
-
-
 
 /*
 fn accumulator<F: PrimeField>(mut input: &mut Vec<F>) {
@@ -636,4 +661,3 @@ mod tests {
     }
 }
 */
-

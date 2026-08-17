@@ -55,12 +55,21 @@ path = "benches/brakedown_bench.rs"
 harness = false
 
 [[bench]]
+name = "brakingbase_bench"
+path = "benches/brakingbase_bench.rs"
+harness = false
+
+[[bench]]
 name = "qapcs_bench"
 path = "benches/qapcs_bench.rs"
 harness = false
 
 [[bench]]
 name = "quasar_bench"
+harness = false
+
+[[bench]]
+name = "matmul_bench"
 harness = false
 
 [[bin]]

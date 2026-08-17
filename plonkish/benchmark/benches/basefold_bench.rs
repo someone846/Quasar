@@ -194,9 +194,18 @@ where
 
     let verify_avg = verify_times[warmup..].iter().copied().sum::<Duration>() / denom;
 
-    append_line("commit_basefold127", &format!("{}, {}", k, commit_avg.as_millis()));
-    append_line("open_basefold127", &format!("{}, {}", k, prove_avg.as_millis()));
-    append_line("verify_basefold127", &format!("{}, {}", k, verify_avg.as_millis()));
+    append_line(
+        "commit_basefold127",
+        &format!("{}, {}", k, commit_avg.as_millis()),
+    );
+    append_line(
+        "open_basefold127",
+        &format!("{}, {}", k, prove_avg.as_millis()),
+    );
+    append_line(
+        "verify_basefold127",
+        &format!("{}, {}", k, verify_avg.as_millis()),
+    );
     append_line("size_basefold127", &format!("{}, {}", k, proof_bytes));
 
     append_line(

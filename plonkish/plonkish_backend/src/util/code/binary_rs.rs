@@ -25,8 +25,7 @@ macro_rules! bail {
     };
 }
 
-fn basis_checked<F:PrimeField>(i:usize) -> Result<F, Error> {
-
+fn basis_checked<F: PrimeField>(i: usize) -> Result<F, Error> {
     if i >= 1 << LOGDEGREE {
         println!("DEGREE MISMATCH");
     }
@@ -43,7 +42,9 @@ pub struct BinarySubspace<F: PrimeField> {
 
 impl<F: PrimeField> Default for BinarySubspace<F> {
     fn default() -> Self {
-        let basis = (0..DEGREE).map(|i| basis_checked(i).ok().unwrap()).collect();
+        let basis = (0..DEGREE)
+            .map(|i| basis_checked(i).ok().unwrap())
+            .collect();
         Self { basis }
     }
 }
@@ -76,8 +77,7 @@ impl<F: PrimeField> BinarySubspace<F> {
     }
 
     /// Creates a new subspace isomorphic to the given one.
-    pub fn isomorphic(&self) -> BinarySubspace<F>
-    {
+    pub fn isomorphic(&self) -> BinarySubspace<F> {
         BinarySubspace {
             basis: self.basis.iter().copied().map(Into::into).collect(),
         }
@@ -127,7 +127,7 @@ impl<F: PrimeField> BinarySubspace<F> {
     }
 
     /// Get a pair of twiddle factors for a given level and index.
-    /// 
+    ///
     /// Returns a tuple (w1, w2) where:
     /// - w1 is the twiddle factor at the given index
     /// - w2 is the twiddle factor at index + (1 << level)
@@ -172,7 +172,7 @@ pub trait TwiddleAccess<F: PrimeField> {
     /// Base-2 logarithm of the number of twiddle factors in this round.
     fn log_n(&self) -> usize;
 
-    fn get_odd_from_even(&self, elem:F) -> F;
+    fn get_odd_from_even(&self, elem: F) -> F;
     /// The twiddle values are the span of this binary subspace, excluding 1 as a basis element,
     /// and with an affine shift.
     ///
@@ -229,7 +229,7 @@ impl<F: PrimeField> OnTheFlyTwiddleAccess<F> {
     /// Generate a vector of OnTheFlyTwiddleAccess objects, one for each NTT round.
     pub fn generate(subspace: &BinarySubspace<F>) -> Result<Vec<Self>, Error> {
         let log_domain_size = subspace.dim();
-        let s_evals= precompute_subspace_evals(subspace)?
+        let s_evals = precompute_subspace_evals(subspace)?
             .into_iter()
             .enumerate()
             .map(|(i, s_evals_i)| Self {
@@ -240,7 +240,7 @@ impl<F: PrimeField> OnTheFlyTwiddleAccess<F> {
             .collect();
         // The `s_evals` for the $i$th round contains the evaluations of $\hat{W}\_i$ on
         // $\beta_{i+1},\ldots ,\beta_{d-1}$.
-       
+
         Ok(s_evals)
     }
 }
@@ -275,7 +275,7 @@ where
         (t0, t0 + self.s_evals.iter().last().unwrap())
     }
 
-    fn get_odd_from_even(&self,elem: F) -> F{
+    fn get_odd_from_even(&self, elem: F) -> F {
         //maps index of twiddle_acecss (which is backwards) to index of array
         //twiddle i has length self.lg_n - i
         elem + self.s_evals.iter().last().unwrap()
@@ -334,7 +334,7 @@ where
         self.log_n
     }
 
-    fn get_odd_from_even(&self,elem: F) -> F{
+    fn get_odd_from_even(&self, elem: F) -> F {
         elem + self.s_evals.last().unwrap()
     }
     fn affine_subspace(&self) -> (BinarySubspace<F>, F) {
@@ -380,7 +380,12 @@ fn precompute_subspace_evals<F: PrimeField>(
 ) -> Result<Vec<Vec<F>>, Error> {
     let log_domain_size = subspace.dim();
 
-    assert_eq!(subspace.basis()[0], F::ONE, "First basis element must be 1, got {:?}", subspace.basis()[0]);
+    assert_eq!(
+        subspace.basis()[0],
+        F::ONE,
+        "First basis element must be 1, got {:?}",
+        subspace.basis()[0]
+    );
 
     let mut s_evals = Vec::with_capacity(log_domain_size);
 
@@ -391,22 +396,22 @@ fn precompute_subspace_evals<F: PrimeField>(
     //`s0_evals` = $(\beta_1,\ldots ,\beta_{d-1}) = (W\_0(\beta_1), \ldots , W\_0(\beta_{d-1}))$
     let s0_evals = subspace.basis()[1..].to_vec();
 
-    assert_ne!(s0_evals.len(),0);
+    assert_ne!(s0_evals.len(), 0);
     s_evals.push(s0_evals);
     // let $W\_i(X)$ be the *unnormalized* subspace polynomial, i.e., $\prod_{u\in U_{i}}(X-u)$.
     // Then $W\_{i+1}(X) = W\_i(X)(W\_i(X)+W\_i(\beta_i))$. This crucially uses the "linearity" of
     // $W\_i(X)$. This fundamental relation allows us to iteratively compute `s_evals` layer by layer.
-    for _ in 1..log_domain_size{
+    for _ in 1..log_domain_size {
         let (norm_const_i, s_i_evals) = {
             let norm_prev = *normalization_consts
                 .last()
                 .expect("normalization_consts is not empty");
             let s_prev_evals = s_evals.last().expect("s_evals is not empty");
-    
+
             // `norm_prev` = $W\_{i-1}(\beta_{i-1})$
             // s_prev_evals = $W\_{i-1}(\beta_i),\ldots ,W\_{i-1}(\beta_{d-1})$
             //println!("norm_prev: {:?}", norm_prev);
-           // println!("s_prev_evals: {:?}", s_prev_evals[0]);
+            // println!("s_prev_evals: {:?}", s_prev_evals[0]);
             let norm_const_i = subspace_map(s_prev_evals[0], norm_prev);
             let s_i_evals = s_prev_evals
                 .iter()
@@ -419,15 +424,13 @@ fn precompute_subspace_evals<F: PrimeField>(
             (norm_const_i, s_i_evals)
         };
 
-   
-
         normalization_consts.push(norm_const_i);
         s_evals.push(s_i_evals);
     }
     normalization_consts.iter().enumerate().for_each(|(i, w)| {
-       // println!("normm const: {:?}", w);
+        // println!("normm const: {:?}", w);
         if w.is_zero().into() {
-           // println!("Found zero weight in binary additive table at index: {}", i);
+            // println!("Found zero weight in binary additive table at index: {}", i);
         }
     });
 
@@ -445,7 +448,7 @@ fn precompute_subspace_evals<F: PrimeField>(
     Ok(s_evals)
 }
 #[test]
-fn test_precompute_subspace_evals(){
+fn test_precompute_subspace_evals() {
     let subspace = BinarySubspace::with_dim(25).ok().unwrap();
     precompute_subspace_evals::<B128>(&subspace);
 }
@@ -486,7 +489,7 @@ where
                 }
             }
 
-            PrecomputedTwiddleAccess {  
+            PrecomputedTwiddleAccess {
                 log_n: log_domain_size - 1 - i,
                 s_evals: expanded,
                 _marker: PhantomData,
@@ -675,4 +678,3 @@ w_hat_layer_x * w_hat_layer_x + w_hat_layer_x
 }
 }
 */
-

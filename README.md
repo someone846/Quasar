@@ -284,6 +284,49 @@ cargo +nightly test --release --features cuda \
 
 The integration test compares CPU and GPU leaf digests, the Merkle root, and a complete Quasar proof.
 
+### End-to-End Verifiable Matrix Multiplication
+
+The matrix-multiplication benchmark uses a shared non-ZK application layer:
+degree-2 sumcheck proves the multiplication identity, then the selected PCS
+proves the three succinct MLE openings for `A`, `B`, and `C`. CPU systems write
+to a common CSV with:
+
+```bash
+cd plonkish
+cargo bench -p benchmark --bench matmul_bench -- \
+  --k 20..=30 \
+  --systems basefold,brakedown,qapcs,quasar \
+  --samples 5 --threads 32 \
+  --quasar-log-rows 6 \
+  --output ./bench_data/matmul/matmul_20_30.csv
+```
+
+Append the device-resident Quasar-GPU results to the same CSV with:
+
+```bash
+cd plonkish
+CUDA_HOME=/usr/local/cuda cargo +nightly run --release \
+  -p qa-gpu-overlay --features cuda --bin matmul_bench_gpu -- \
+  --k 20..=30 \
+  --systems quasar-gpu \
+  --samples 5 --threads 32 \
+  --quasar-log-rows 6 --gpu-batch-rows 8 \
+  --output ./bench_data/matmul/matmul_20_30.csv
+```
+
+For a GPU correctness smoke test, including exact CPU/CUDA Merkle-root checks:
+
+```bash
+cd plonkish
+CUDA_HOME=/usr/local/cuda cargo +nightly test --release \
+  -p qa-gpu-overlay --features cuda \
+  --test matmul_cuda -- --nocapture
+```
+
+The GPU driver moves each dense matrix directly into reusable pinned input
+storage. The same allocation feeds the application reduction, Quasar opening
+prover, and CUDA H2D path, avoiding an additional full witness copy.
+
 ## Important Parameters
 
 ### `--total-k`

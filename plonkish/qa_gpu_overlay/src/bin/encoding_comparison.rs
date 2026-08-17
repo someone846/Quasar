@@ -41,17 +41,13 @@ mod with_cuda {
         util::{
             arithmetic::{Field, PrimeField},
             avx_int_types::u64::Blazeu64,
-            code::{
-                encode_bits_ser, Brakedown, BrakedownSpec, LinearCodes, Permutation,
-            },
+            code::{encode_bits_ser, Brakedown, BrakedownSpec, LinearCodes, Permutation},
             hash::Blake2s,
             new_fields::Mersenne127,
         },
     };
     use qa_gpu_overlay::{
-        cpu::{
-            qa_encode_cpu_parallel_single_row, qa_encode_cpu_serial_single_row,
-        },
+        cpu::{qa_encode_cpu_parallel_single_row, qa_encode_cpu_serial_single_row},
         gpu::{GpuQaEncoder, GpuQaTiming},
     };
     use rand_chacha::{
@@ -129,10 +125,7 @@ mod with_cuda {
          -h, --help                  show this help"
     }
 
-    fn next_usize(
-        name: &str,
-        args: &mut impl Iterator<Item = String>,
-    ) -> Result<usize, String> {
+    fn next_usize(name: &str, args: &mut impl Iterator<Item = String>) -> Result<usize, String> {
         args.next()
             .ok_or_else(|| format!("missing value for {name}"))?
             .parse::<usize>()
@@ -150,19 +143,13 @@ mod with_cuda {
                 "--repetitions" => config.repetitions = next_usize(&argument, &mut args)?,
                 "--warmups" => config.warmups = next_usize(&argument, &mut args)?,
                 "--threads" => config.threads = next_usize(&argument, &mut args)?,
-                "--qa-inverse-rate" => {
-                    config.qa_inverse_rate = next_usize(&argument, &mut args)?
-                }
-                "--raa-inverse-rate" => {
-                    config.raa_inverse_rate = next_usize(&argument, &mut args)?
-                }
+                "--qa-inverse-rate" => config.qa_inverse_rate = next_usize(&argument, &mut args)?,
+                "--raa-inverse-rate" => config.raa_inverse_rate = next_usize(&argument, &mut args)?,
                 "--basefold-inverse-rate" => {
                     config.basefold_inverse_rate = next_usize(&argument, &mut args)?
                 }
                 "--qa-rows" => config.qa_rows = next_usize(&argument, &mut args)?,
-                "--gpu-batch-rows" => {
-                    config.gpu_batch_rows = next_usize(&argument, &mut args)?
-                }
+                "--gpu-batch-rows" => config.gpu_batch_rows = next_usize(&argument, &mut args)?,
                 "--qa-only" => config.qa_only = true,
                 "--seed" => {
                     config.seed = args
@@ -200,7 +187,9 @@ mod with_cuda {
             }
         }
         if config.basefold_inverse_rate != 2 {
-            return Err("this benchmark currently supports BaseFold inverse rate 2 only".to_owned());
+            return Err(
+                "this benchmark currently supports BaseFold inverse rate 2 only".to_owned(),
+            );
         }
         if !config.qa_rows.is_power_of_two() || config.qa_rows > (1usize << config.log_min) {
             return Err("qa-rows must be a power of two no larger than 2^log-min".to_owned());
@@ -270,9 +259,8 @@ mod with_cuda {
     impl GpuBreakdown {
         fn from_samples(samples: &[GpuQaTiming]) -> Self {
             let divisor = samples.len() as f64;
-            let sum = |select: fn(&GpuQaTiming) -> f64| {
-                samples.iter().map(select).sum::<f64>() / divisor
-            };
+            let sum =
+                |select: fn(&GpuQaTiming) -> f64| samples.iter().map(select).sum::<f64>() / divisor;
             Self {
                 h2d_mean_ms: sum(|sample| sample.host_to_device_ms),
                 kernel_mean_ms: sum(|sample| {
@@ -301,7 +289,11 @@ mod with_cuda {
         notes: &'a str,
     }
 
-    fn timed_samples(mut operation: impl FnMut(), warmups: usize, repetitions: usize) -> Vec<Duration> {
+    fn timed_samples(
+        mut operation: impl FnMut(),
+        warmups: usize,
+        repetitions: usize,
+    ) -> Vec<Duration> {
         for _ in 0..warmups {
             operation();
         }
@@ -454,22 +446,28 @@ mod with_cuda {
     ) -> Result<(), String> {
         let input_len = 1usize << log_input;
         let qa_row_len = input_len / config.qa_rows;
-        println!("input=2^{log_input} ({input_len} elements), QA rows={}", config.qa_rows);
+        println!(
+            "input=2^{log_input} ({input_len} elements), QA rows={}",
+            config.qa_rows
+        );
 
         let field_input = (0..input_len)
             .map(|_| <Mersenne127 as Field>::random(&mut *rng))
             .collect::<Vec<_>>();
         let raa_input = (0..input_len)
-            .map(|_| Blazeu64 { value: rng.next_u64() })
+            .map(|_| Blazeu64 {
+                value: rng.next_u64(),
+            })
             .collect::<Vec<_>>();
 
         // QA setup is public randomness generation and is intentionally outside encoding time.
         let qa_setup_start = Instant::now();
-        let qa_params = plonkish_backend::pcs::multilinear::quasar::QAParams::<Mersenne127>::new_random(
-            qa_row_len,
-            config.qa_inverse_rate,
-            &mut *rng,
-        );
+        let qa_params =
+            plonkish_backend::pcs::multilinear::quasar::QAParams::<Mersenne127>::new_random(
+                qa_row_len,
+                config.qa_inverse_rate,
+                &mut *rng,
+            );
         let qa_setup = qa_setup_start.elapsed();
 
         let qa_serial_samples = timed_samples(
@@ -490,7 +488,8 @@ mod with_cuda {
             setup: qa_setup,
             stats: Stats::from_durations(&qa_serial_samples),
             gpu: None,
-            notes: "single QA codeword; existing serial per-row WHT path; output allocation included",
+            notes:
+                "single QA codeword; existing serial per-row WHT path; output allocation included",
         };
         write_record(output, config, &qa_serial_record)?;
         print_record(&qa_serial_record);
@@ -503,8 +502,7 @@ mod with_cuda {
             config.warmups,
             config.repetitions,
         );
-        let qa_parallel_reference =
-            qa_encode_cpu_parallel_single_row(&field_input, &qa_params);
+        let qa_parallel_reference = qa_encode_cpu_parallel_single_row(&field_input, &qa_params);
         if qa_parallel_reference != qa_serial_reference {
             return Err(format!(
                 "QA serial/parallel output mismatch at input 2^{log_input}"
@@ -582,11 +580,8 @@ mod with_cuda {
         let raa_setup_start = Instant::now();
         let permutation = Permutation::create(&mut *rng, input_len * config.raa_inverse_rate);
         let raa_setup = raa_setup_start.elapsed();
-        let raa_validation = encode_bits_ser(
-            raa_input.clone(),
-            &permutation,
-            config.raa_inverse_rate,
-        );
+        let raa_validation =
+            encode_bits_ser(raa_input.clone(), &permutation, config.raa_inverse_rate);
         if raa_validation.len() != input_len * config.raa_inverse_rate {
             return Err(format!(
                 "RAA returned {} elements, expected {}",
@@ -599,7 +594,11 @@ mod with_cuda {
         let mut raa_precise_samples = Vec::with_capacity(config.repetitions);
         for _ in 0..config.warmups {
             let message = raa_input.clone();
-            black_box(encode_bits_ser(message, &permutation, config.raa_inverse_rate));
+            black_box(encode_bits_ser(
+                message,
+                &permutation,
+                config.raa_inverse_rate,
+            ));
         }
         for _ in 0..config.repetitions {
             let message = raa_input.clone();
@@ -636,10 +635,8 @@ mod with_cuda {
         let brakedown_codeword_len = brakedown.codeword_len();
         let brakedown_rows = input_len / brakedown_row_len;
         let brakedown_setup = brakedown_setup_start.elapsed();
-        let mut brakedown_output = vec![
-            <Mersenne127 as Field>::ZERO;
-            brakedown_rows * brakedown_codeword_len
-        ];
+        let mut brakedown_output =
+            vec![<Mersenne127 as Field>::ZERO; brakedown_rows * brakedown_codeword_len];
         let brakedown_samples = timed_samples(
             || {
                 brakedown_output
@@ -707,12 +704,17 @@ mod with_cuda {
         };
         write_record(output, config, &basefold_record)?;
         print_record(&basefold_record);
-        output.flush().map_err(|error| format!("failed to flush CSV: {error}"))?;
+        output
+            .flush()
+            .map_err(|error| format!("failed to flush CSV: {error}"))?;
         Ok(())
     }
 
     fn create_output(path: &Path) -> Result<BufWriter<File>, String> {
-        if let Some(parent) = path.parent().filter(|parent| !parent.as_os_str().is_empty()) {
+        if let Some(parent) = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
             fs::create_dir_all(parent)
                 .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
         }
